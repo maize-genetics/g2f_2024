@@ -1,8 +1,8 @@
 # g2f_2024
 Genomes to fields 2024 genome assemblies
 
-Machine used for compute: cbsuxm01  
-Files stored on: cbsublfs1   
+Machine used for compute: ```cbsuxm01```  
+Files stored on: ```cbsublfs1```   
 
 ## Assembly
 Combine HiFi bams into single fastq.gz file:
