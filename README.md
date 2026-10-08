@@ -4,7 +4,7 @@ Genomes to fields 2024 genome assemblies
 Machine used for compute: ```cbsuxm01```  
 Files stored on: ```cbsublfs1```   
 
-## Assembly
+## Preprocess data
 #### Combine HiFi bams into single fastq.gz file:
 ```
 nohup bam2fasta -c 1 \
@@ -13,7 +13,24 @@ m84109_240806_024441_s4.hifi_reads.bc2027.bam \
 m84109_240611_191050_s2.hifi_reads.bc2088.bam \
 > bam2fasta.log 2>&1 &
 ```
-#### Make directory for hifiasm run:
+#### Extract and combine nanopore FASTAs
+```
+set -o pipefail
+
+(
+  tar -xOf 240520-10474838_2_PAQ81223_a7f454ae_fastq.tar \
+    --wildcards './fastq_pass/*.fastq.gz' &&
+
+  tar -xOf 240520-10474838_2b_PAQ81223_10d1bef7_fastq.tar \
+    --wildcards './fastq_pass/*.fastq.gz'
+
+) | gzip -dc \
+  | seqkit seq -m 50001 \
+      -o PHBW8_ONT_gt50kb.fastq.gz
+```
+
+## Assembly
+#### Make directory for hifiasm runs:
 ```
 mkdir -p hifiasm_v0.25.0
 cd hifiasm_v0.25.0
@@ -28,7 +45,7 @@ cd default
 nohup /programs/hifiasm-0.25.0/hifiasm \
     -o EB2_PHBW8.asm \
     -t 100 \
-    ../../EB2_PHBW8.hifi.fasta.gz \
+    ../../../EB2_PHBW8.hifi.fasta.gz \
     > EB2_PHBW8.asm.stdout.log \
     2> EB2_PHBW8.asm.stderr.log &
 
@@ -40,11 +57,15 @@ nohup /programs/hifiasm-0.25.0/hifiasm \
     -o EB2_PHBW8.asm \
     -t 100 \
     -l0 \
-    ../EB2_PHBW8.hifi.fasta.gz \
+    ../../../EB2_PHBW8.hifi.fasta.gz \
     > EB2_PHBW8.asm.stdout.log \
     2> EB2_PHBW8.asm.stderr.log &
 
 echo $!
+```
+With ONT l0
+```
+hifiasm -o PHBW8_HiFi_Nano --ul /PHBW8/nanopore/240520-10474838_2_filtered.fastq.gz -t100 -l0 /PHBW8/Pacbio/m84109_PHBW8_HiFi_merged.fq
 ```
 Convert hifiasm GFA file output into FASTA (from hifiasm Github)
 ```
