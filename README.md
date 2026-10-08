@@ -81,3 +81,40 @@ Run BUSCO
 ```
 nohup singularity exec ~/busco.sif busco     -i EB2_PHBW8.asm.bp.p_ctg.fa     -o EB2_PHBW8_busco_liliopsida_odb10     -m genome     -l liliopsida_odb10     --download_path ~/busco_downloads     --offline     --skip_bbtools     --opt-out-run-stats     -c 40     > EB2_PHBW8.busco.stdout.log     2> EB2_PHBW8.busco.stderr.log &
 ```
+
+
+
+## Future Dev
+```
+genome-pipeline/
+├── AGENTS.md
+├── CLAUDE.md
+├── README.md
+├── config/
+│   ├── species/
+│   │   ├── zea_mays.yaml
+│   │   └── arabidopsis_thaliana.yaml
+│   ├── samples/
+│   │   └── PHBW8.yaml
+│   └── profiles/
+│       └── cornell_biohpc.yaml
+├── docs/
+│   ├── decisions.md
+│   └── methods.md
+├── scripts/
+│   └── assembly/
+├── runs/
+│   └── PHBW8/
+│       ├── commands.sh
+│       ├── manifest.yaml
+│       └── results_summary.tsv
+├── workflow/             # Later
+│   ├── Snakefile
+│   └── rules/
+│       ├── assembly.smk
+│       ├── qc.smk
+│       ├── repeats.smk
+│       ├── genes.smk
+│       └── cres.smk
+└── tests/
+```
