@@ -52,6 +52,10 @@ awk '/^S/{print ">"$2;print $3}' \
     EB2_PHBW8.asm.bp.p_ctg.gfa \
     > EB2_PHBW8.asm.bp.p_ctg.fa
 ```
+seqkit stats
+```
+seqkit stats -a EB2_PHBW8.asm.bp.p_ctg.fa
+```
 Run BUSCO
 ```
 nohup singularity exec ~/busco.sif busco     -i EB2_PHBW8.asm.bp.p_ctg.fa     -o EB2_PHBW8_busco_liliopsida_odb10     -m genome     -l liliopsida_odb10     --download_path ~/busco_downloads     --offline     --skip_bbtools     --opt-out-run-stats     -c 40     > EB2_PHBW8.busco.stdout.log     2> EB2_PHBW8.busco.stderr.log &
