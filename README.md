@@ -45,7 +45,7 @@ cd default
 nohup /programs/hifiasm-0.25.0/hifiasm \
     -o EB2_PHBW8.asm \
     -t 100 \
-    ../../../EB2_PHBW8.hifi.fasta.gz \
+    /local/workdir/naj49/g2f_assemblies_2024/EB2_PHBW8.hifi.fasta.gz \
     > EB2_PHBW8.asm.stdout.log \
     2> EB2_PHBW8.asm.stderr.log &
 
@@ -57,7 +57,7 @@ nohup /programs/hifiasm-0.25.0/hifiasm \
     -o EB2_PHBW8.asm \
     -t 100 \
     -l0 \
-    ../../../EB2_PHBW8.hifi.fasta.gz \
+    /local/workdir/naj49/g2f_assemblies_2024/EB2_PHBW8.hifi.fasta.gz \
     > EB2_PHBW8.asm.stdout.log \
     2> EB2_PHBW8.asm.stderr.log &
 
@@ -65,7 +65,16 @@ echo $!
 ```
 With ONT l0
 ```
-hifiasm -o PHBW8_HiFi_Nano --ul /PHBW8/nanopore/240520-10474838_2_filtered.fastq.gz -t100 -l0 /PHBW8/Pacbio/m84109_PHBW8_HiFi_merged.fq
+nohup /programs/hifiasm-0.25.0/hifiasm \
+    -o PHBW8_HiFi_Nano_l0 \
+    --ul /local/workdir/naj49/g2f_assemblies_2024/PHBW8_ONT_gt50kb.fastq.gz \
+    -t 100 \
+    -l0 \
+    /local/workdir/naj49/g2f_assemblies_2024/EB2_PHBW8.hifi.fasta.gz \
+    > PHBW8_HiFi_Nano_l0.stdout.log \
+    2> PHBW8_HiFi_Nano_l0.stderr.log &
+
+echo $!
 ```
 Convert hifiasm GFA file output into FASTA (from hifiasm Github)
 ```
@@ -84,7 +93,13 @@ nohup singularity exec ~/busco.sif busco     -i EB2_PHBW8.asm.bp.p_ctg.fa     -o
 
 
 
-## Future Dev
+## Future Dev Rough Ideas (could be complete nonsense, I will know later when I think about it more)
+- Rough potential structure for pipeline
+- Keep modular for future
+- Agent skill or similar for easy updating, and maybe usage by user
+- Agent generates snakemake input file and run command for user to check over and run themself
+- ?User sends agent some biological information to generate a snakemake file? Either input JSON or plain text paragraph on info? JSON probably easier, which is essentially bulleted list of ploidy, genome length, heterozygosity, etc? Or does pipeline calculate this for you and then does a run? Either way, user does the runs.
+- 
 ```
 genome-pipeline/
 ├── AGENTS.md
