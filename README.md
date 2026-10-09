@@ -79,21 +79,37 @@ echo $!
 Convert hifiasm GFA file output into FASTA (from hifiasm Github)
 ```
 awk '/^S/{print ">"$2;print $3}' \
-    EB2_PHBW8.asm.bp.p_ctg.gfa \
-    > EB2_PHBW8.asm.bp.p_ctg.fa
+    PHBW8_HiFi_Nano_l0.bp.p_ctg.gfa \
+    > PHBW8_HiFi_Nano_l0.bp.p_ctg.fa
 ```
 seqkit stats
 ```
-seqkit stats -a EB2_PHBW8.asm.bp.p_ctg.fa
+seqkit stats -a PHBW8_HiFi_Nano_l0.bp.p_ctg.fa \
+> PHBW8_HiFi_Nano_l0_seqstats.txt
 ```
 Run BUSCO
 ```
-nohup singularity exec ~/busco.sif busco     -i EB2_PHBW8.asm.bp.p_ctg.fa     -o EB2_PHBW8_busco_liliopsida_odb10     -m genome     -l liliopsida_odb10     --download_path ~/busco_downloads     --offline     --skip_bbtools     --opt-out-run-stats     -c 40     > EB2_PHBW8.busco.stdout.log     2> EB2_PHBW8.busco.stderr.log &
+nohup singularity exec \
+  --bind "$PWD:$PWD:rw" \
+  ~/busco.sif busco \
+  -i PHBW8_HiFi_Nano_l0.bp.p_ctg.fa \
+  -o PHBW8_HiFi_Nano_l0_busco_liliopsida_odb10 \
+  -m genome \
+  -l liliopsida_odb10 \
+  --download_path ~/busco_downloads \
+  --offline \
+  --skip_bbtools \
+  --opt-out-run-stats \
+  -c 40 \
+  > PHBW8_HiFi_Nano_l0.busco.stdout.log \
+  2> PHBW8_HiFi_Nano_l0.busco.stderr.log &
+
+echo $!
 ```
 
 
 
-## Future Dev Rough Ideas (could be complete nonsense, I will know later when I think about it more)
+## Future Dev Rough Ideas (could be complete nonsense)
 - Rough potential structure for pipeline
 - Keep modular for future
 - Agent skill or similar for easy updating, and maybe usage by user
