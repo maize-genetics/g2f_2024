@@ -1,0 +1,40 @@
+# Large genomic data (should never be inside the repository)
+*.bam
+*.bai
+*.pbi
+*.pod5
+*.fast5
+*.fastq
+*.fq
+*.fasta
+*.fa
+*.fna
+*.gfa
+*.fastq.gz
+*.fq.gz
+*.fasta.gz
+*.fa.gz
+*.bin
+*.sif
+*.meryl/
+
+# Local inputs and outputs (live outside pipeline/ by convention)
+data/
+results/
+logs/
+scratch/
+tmp/
+
+# Machine-specific configuration
+config/local/*
+!config/local/README.md
+!config/local/local.example.yaml
+
+# Snakemake / Python caches
+.snakemake/
+__pycache__/
+*.pyc
+
+# Local agent preferences
+CLAUDE.local.md
+.claude/settings.local.json

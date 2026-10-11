@@ -1,0 +1,50 @@
+# G2F maize genome resource workflow.
+#
+# Run from the pipeline/ directory:
+#   snakemake --profile profiles/biohpc --dry-run --printshellcmds
+#   snakemake --profile profiles/biohpc --cores 64
+#
+# Stages: input discovery -> HiFi/ONT read preprocessing and QC -> k-mer
+# screen -> hifiasm (method chosen automatically) -> GFA-to-FASTA with
+# consistency checks -> assembly statistics, BUSCO, Merqury -> validated
+# per-sample and project summary tables.
+
+import os
+import sys
+
+from snakemake.utils import min_version
+
+min_version("8.0")
+
+PIPELINE_DIR = os.path.abspath(os.path.join(workflow.basedir, ".."))
+sys.path.insert(0, os.path.join(PIPELINE_DIR, "scripts"))
+
+configfile: os.path.join(PIPELINE_DIR, "config", "config.yaml")
+
+
+include: "rules/common.smk"
+include: "rules/inputs.smk"
+include: "rules/hifi.smk"
+include: "rules/ont.smk"
+include: "rules/kmer.smk"
+include: "rules/assembly.smk"
+include: "rules/qc.smk"
+include: "rules/summary.smk"
+
+
+rule all:
+    input:
+        [validated_marker(s, METHOD[s]) for s in SAMPLES],
+        PROJECT_SUMMARY if SAMPLES else [],
+
+
+rule reads_qc:
+    """Preprocess and validate reads and run the k-mer screen; no assembly."""
+    input:
+        [p for s in SAMPLES for p in reads_qc_targets(s)],
+
+
+rule inventory_all:
+    """Write the input inventory of every discovered sample (cheap)."""
+    input:
+        [inventory_path(s) for s in SAMPLES],

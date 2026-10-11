@@ -1,0 +1,37 @@
+# Tool commands for Cornell BioHPC servers. Computational environment only.
+# Each entry: the command prefix used by the workflow, and the command used
+# to report its version (recorded in provenance at execution time).
+#
+# For another site, copy this file, edit the commands, and point
+# config/config.yaml (or --config tools=...) at the copy.
+
+tools:
+  hifiasm:
+    cmd: /programs/hifiasm-0.25.0/hifiasm
+    version_cmd: /programs/hifiasm-0.25.0/hifiasm --version
+  seqkit:
+    cmd: /programs/seqkit-2.13.0/seqkit
+    version_cmd: /programs/seqkit-2.13.0/seqkit version
+  samtools:
+    cmd: /programs/samtools-1.20/bin/samtools
+    version_cmd: /programs/samtools-1.20/bin/samtools --version | head -1
+  # pbtk (bam2fastq) is not installed as a BioHPC module. Pull the
+  # biocontainers image once (see README "One-time setup") and set the path.
+  bam2fastq:
+    cmd: apptainer exec --bind /workdir,/local/workdir {containers}/pbtk.sif bam2fastq
+    version_cmd: apptainer exec {containers}/pbtk.sif bam2fastq --version
+  meryl:
+    cmd: apptainer exec --bind /workdir,/local/workdir /programs/merqury-1.3/merqury.sif meryl
+    version_cmd: apptainer exec /programs/merqury-1.3/merqury.sif meryl --version
+  merqury:
+    cmd: apptainer exec --bind /workdir,/local/workdir /programs/merqury-1.3/merqury.sif merqury.sh
+    version_cmd: echo merqury-1.3 container /programs/merqury-1.3/merqury.sif
+  busco:
+    cmd: apptainer exec --bind /workdir,/local/workdir /programs/busco-6.1.0/busco.sif busco
+    version_cmd: apptainer exec /programs/busco-6.1.0/busco.sif busco --version
+  md5sum:
+    cmd: md5sum
+    version_cmd: md5sum --version | head -1
+
+# Substituted into {containers} above; override in config/local/local.yaml.
+containers_dir: /workdir/naj49/containers

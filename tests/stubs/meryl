@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+"""Test stub for meryl: 'count' creates a DB directory; 'histogram' prints a
+synthetic single-peak (homozygous-looking) spectrum."""
+import math
+import os
+import sys
+
+args = sys.argv[1:]
+if "--version" in args:
+    print("meryl stub 0.0")
+elif args[0] == "count":
+    out = args[args.index("output") + 1]
+    os.makedirs(out, exist_ok=True)
+    open(os.path.join(out, "merylIndex"), "w").write("stub\n")
+elif args[0] == "histogram":
+    peak = int(os.environ.get("STUB_KMER_PEAK", "30"))
+    het = os.environ.get("STUB_KMER_HET") == "1"
+    for x in range(1, 120):
+        err = 5e7 * math.exp(-x / 1.5)
+        hom = 3e7 * math.exp(-((x - peak) ** 2) / (2 * (peak / 6) ** 2))
+        h = 2.5e7 * math.exp(-((x - peak / 2) ** 2) / (2 * (peak / 10) ** 2)) if het else 0
+        print(f"{x}\t{int(err + hom + h)}")

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Test stub for pbtk bam2fastq: bam2fastq -o PREFIX in.bam -> PREFIX.fastq.gz
+set -euo pipefail
+if [[ "${1:-}" == "--version" ]]; then echo "bam2fastq stub"; exit 0; fi
+prefix=$2; bam=$3
+"${SAMTOOLS:-samtools}" fastq "$bam" 2>/dev/null | gzip -c > "$prefix.fastq.gz"

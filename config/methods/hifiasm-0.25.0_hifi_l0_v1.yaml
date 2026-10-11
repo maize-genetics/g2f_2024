@@ -1,0 +1,16 @@
+# Assembly method: HiFi-only hifiasm, no purging.
+# Immutable once used for a production assembly. To change anything, create
+# a new file with a new method_id and document why.
+method_id: hifiasm-0.25.0_hifi_l0_v1
+description: >
+  hifiasm v0.25.0, PacBio HiFi reads only, purge level 0 (-l0), no manual
+  coverage overrides. Baseline for highly inbred maize lines (PHBW8
+  precedent: legacy run hifi_only/l0).
+assembler: hifiasm
+# Exact string the tool must report (hifiasm --version); checked at runtime.
+expected_version: 0.25.0-r726
+read_types: [hifi]
+# Scientific arguments only. Threads and output prefix are added by the
+# workflow from computational settings.
+args: ["-l0"]
+ont: null

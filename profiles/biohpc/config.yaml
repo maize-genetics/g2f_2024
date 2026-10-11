@@ -1,0 +1,20 @@
+# Snakemake profile for running directly on a BioHPC server (no scheduler).
+# Usage (from pipeline/):  snakemake --profile profiles/biohpc ...
+#
+# --cores caps the total threads of concurrently running jobs. Set it to what
+# you have reserved on the machine, not the machine's total.
+cores: 32
+# Rerun a job only when its inputs are newer than its outputs. Code or
+# parameter edits must never silently trigger re-assembly; changed science
+# goes into a new method_id instead.
+rerun-triggers: mtime
+printshellcmds: true
+show-failed-logs: true
+latency-wait: 30
+# Keep temporary files off the shared /tmp (relative to pipeline/).
+default-resources:
+  - "tmpdir='../tmp'"
+# Uncomment and set to your memory reservation (MB) so Snakemake does not
+# start jobs whose combined mem_mb would exceed it:
+# resources:
+#   - mem_mb=500000

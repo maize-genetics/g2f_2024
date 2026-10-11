@@ -1,0 +1,61 @@
+# Register of historical PHBW8 assemblies (read-only benchmarks).
+# Never written to by the workflow (config.yaml legacy_dirs). Values are
+# verified from logs/GFAs on 2026-10-10 unless marked null (unknown).
+sample: PHBW8
+alias_used: EB2_PHBW8
+root: /workdir/naj49/g2f_assemblies_2024/hifiasm_v0.25.0
+inputs:
+  hifi_reads:
+    path: /workdir/naj49/g2f_assemblies_2024/EB2_PHBW8.hifi.fasta.gz
+    reads: 5048086
+    bases: 84306681424
+    source_bams: [m84109_240806_024441_s4.hifi_reads.bc2027.bam,
+                  m84109_240611_191050_s2.hifi_reads.bc2088.bam]   # from project description
+    source_bam_paths: null
+    conversion_command: null
+    checksum: null
+  ont_reads:
+    path: /workdir/naj49/g2f_assemblies_2024/PHBW8_ONT_gt50kb.fastq.gz
+    prefiltered: true
+    filter_command: null
+    raw_source: null
+    raw_yield_bases: null
+    hifiasm_passed_ul_reads: 12416
+    basecall_model_sampled: dna_r10.4.1_e8.2_400bps_hac@v4.2.0
+    flow_cell_sampled: PAQ81223
+runs:
+  - id: legacy_hifi_default
+    dir: hifi_only/default
+    original_dir: /local/workdir/naj49/hifiasm_v0.25.0/default   # per BUSCO JSON
+    hifiasm_version: 0.25.0-r726
+    command: "/programs/hifiasm-0.25.0/hifiasm -o EB2_PHBW8.asm -t 100 ../../EB2_PHBW8.hifi.fasta.gz"
+    p_ctg: {contigs: 1236, total_bp: 2280334098, n50: 121136081, l50: 6}
+    other_outputs: {hap1_p_ctg_bp: 2044910203, hap2_p_ctg_bp: 365127477}
+    busco_liliopsida_odb10: "C:99.1%[S:82.5%,D:16.6%],F:0.6%,M:0.2%,n:3236,E:4.0%"
+    gfa_to_fasta_command: null
+    busco_command: null
+  - id: legacy_hifi_l0
+    dir: hifi_only/l0
+    original_dir: /local/workdir/naj49/hifiasm_v0.25.0/l0
+    hifiasm_version: 0.25.0-r726
+    command: "/programs/hifiasm-0.25.0/hifiasm -o EB2_PHBW8.asm -t 120 -l0 ../EB2_PHBW8.hifi.fasta.gz"
+    p_ctg: {contigs: 1492, total_bp: 2315072677, n50: 110301032, l50: 6}
+    a_ctg: {contigs: 1705, total_bp: 75668970}
+    busco_liliopsida_odb10: "C:99.1%[S:81.9%,D:17.3%],F:0.6%,M:0.2%,n:3236,E:4.0%"
+    gfa_to_fasta_command: null
+    busco_command: null
+  - id: legacy_hifi_ont_l0
+    dir: ont_hifi
+    hifiasm_version: 0.25.0-r726
+    command: "/programs/hifiasm-0.25.0/hifiasm -o PHBW8_HiFi_Nano_l0 --ul /local/workdir/naj49/g2f_assemblies_2024/PHBW8_ONT_gt50kb.fastq.gz -t 100 -l0 /local/workdir/naj49/g2f_assemblies_2024/EB2_PHBW8.hifi.fasta.gz"
+    p_ctg: {contigs: 490, total_bp: 2266382187, n50: 121136088, l50: 6, gc_pct: 46.71}
+    a_ctg: {contigs: 1901, total_bp: 81660100}
+    busco_liliopsida_odb10: "C:99.1%[S:82.2%,D:17.0%],F:0.6%,M:0.2%,n:3236,E:4.0%"
+    gfa_to_fasta_command: null
+    busco_command: null
+busco_common:
+  version: 6.1.0
+  mode: euk_genome_min
+  miniprot: 0.18-r281
+  lineage: {name: liliopsida_odb10, orthodb: "10.1", created: 2024-01-08, markers: 3236}
+  internal_stop_codon_complete_buscos: 127   # unresolved; see audit

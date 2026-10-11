@@ -1,0 +1,19 @@
+# Assembly method: HiFi + ONT ultra-long hifiasm, no purging.
+# Immutable once used for a production assembly. To change anything, create
+# a new file with a new method_id and document why.
+method_id: hifiasm-0.25.0_hifi-ont-ul50k_l0_v1
+description: >
+  hifiasm v0.25.0, PacBio HiFi plus ONT reads >= 50 kb supplied with --ul,
+  purge level 0 (-l0), no manual coverage overrides. PHBW8 precedent:
+  legacy run ont_hifi.
+assembler: hifiasm
+expected_version: 0.25.0-r726
+read_types: [hifi, ont]
+args: ["-l0"]
+ont:
+  # Reads shorter than this are discarded before --ul (seqkit seq -m).
+  # Starting value from the PHBW8 precedent; revisit after evaluating
+  # retained coverage and assembly performance.
+  min_read_len: 50000
+  # Halt (human review) if no reads pass the filter.
+  min_retained_reads: 1

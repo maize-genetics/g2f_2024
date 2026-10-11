@@ -1,0 +1,36 @@
+# Top-level workflow configuration.
+#
+# Relative paths are resolved against the pipeline/ directory (the Snakemake
+# working directory). This file only wires the other configuration files
+# together; scientific parameters live in science.yaml and methods/, and
+# computational settings live in resources/ and tools/.
+
+# Sequencing inputs: data/<SAMPLE>/{hifi,ont}/
+data_dir: ../data
+
+# All workflow outputs. Must not overlap data_dir or any legacy directory.
+results_dir: ../results
+
+# Historical results that the workflow must never write into.
+legacy_dirs:
+  - ../hifiasm_v0.25.0
+
+# Tracked, shareable sample metadata (aliases, acknowledgements, overrides).
+samples: config/samples.yaml
+
+# Versioned scientific configuration.
+science: config/science.yaml
+methods_dir: config/methods
+
+# Computational settings (swap these per machine; they never change science).
+resources: config/resources/default.yaml
+tools: config/tools/biohpc.yaml
+
+# Optional, untracked machine-specific settings: external read-only input
+# references and local paths (e.g. BUSCO lineage directory). See
+# config/local/README.md.
+local: config/local/local.yaml
+
+# Restrict the run to a subset of samples, e.g. --config only_samples=PHBW8
+# Empty list = all discovered samples.
+only_samples: []

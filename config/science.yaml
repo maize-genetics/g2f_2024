@@ -1,0 +1,74 @@
+# Scientific configuration (versioned). Changing anything here changes the
+# analysis: bump science_version and record the reason in
+# docs/scientific_decisions.md.
+science_version: 1
+
+# Automatic assembly method selection. The workflow inspects validated inputs
+# for each sample and picks exactly one primary method:
+#   - ONT reads present and valid  -> ont_present
+#   - no ONT inputs at all         -> ont_absent
+#   - ONT inputs present but unusable -> workflow halts (never falls back).
+method_policy:
+  ont_present: hifiasm-0.25.0_hifi-ont-ul50k_l0_v1
+  ont_absent: hifiasm-0.25.0_hifi_l0_v1
+
+# Approximate haploid genome size, used ONLY to report approximate read
+# coverage. It is not passed to hifiasm. 2.3 Gb is close to the PHBW8
+# assembly sizes (2.27-2.32 Gb); review per line if needed.
+genome_size_bp: 2300000000
+
+# Input discovery policy.
+discovery:
+  # Number of leading records inspected per file to establish identity
+  # (cheap; full-file checks happen later in the workflow).
+  sample_records: 200
+  # Files with these suffixes are recognised as non-read auxiliary files and
+  # ignored (recorded in the inventory as "ignored").
+  auxiliary_suffixes:
+    - .pbi
+    - .bai
+    - .csi
+    - .xml
+    - .md5
+    - .sha256
+    - .txt
+    - .json
+    - .html
+    - .pdf
+    - .log
+    - README
+    - README.md
+  # ONT inputs whose sampled reads are all at least this long are flagged as
+  # possibly pre-filtered and require explicit acknowledgement in
+  # samples.yaml, because their yield cannot be reported as "raw".
+  ont_prefilter_suspect_min_len: 50000
+
+# Read k-mer screen (meryl) used both for Merqury and to flag samples whose
+# k-mer spectrum suggests residual heterozygosity. This is a screening
+# heuristic, not an estimate of heterozygosity.
+kmer:
+  k: 21
+  screen:
+    # Window around half the main peak coverage that is inspected for a
+    # heterozygous peak.
+    half_peak_window: [0.35, 0.65]
+    # Flag if the max histogram height in the half-peak window exceeds this
+    # fraction of the main peak height, or if a local maximum exists there.
+    max_half_peak_height_ratio: 0.25
+    # Halt before assembly when flagged, until samples.yaml records a review.
+    block_assembly_on_flag: true
+
+qc:
+  busco:
+    # Primary lineage. liliopsida_odb10 is retained only for historical
+    # comparison and is not interchangeable with odb12 results.
+    lineages:
+      - poales_odb12
+    mode: genome
+    # Historical PHBW8 runs used miniprot (BUSCO mode euk_genome_min).
+    gene_predictor: miniprot
+  merqury:
+    enabled: true
+  # Contigs shorter than this are listed separately for organelle /
+  # contamination follow-up (no screening tool is run yet).
+  small_contig_report_max_len: 1000000

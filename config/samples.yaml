@@ -1,0 +1,42 @@
+# Shareable sample metadata (tracked in Git).
+#
+# Samples are discovered from data/<SAMPLE>/ directories and from external
+# input references in config/local/local.yaml. An entry here is optional for
+# discovery, but it is where human decisions about a sample are recorded:
+#
+#   aliases:            historical or alternative names (never used as IDs)
+#   metadata:           free-form descriptive fields; use null for unknown
+#   exclude_inputs:     basenames of discovered files that must NOT be used,
+#                       each with a reason (e.g. derived copy of a BAM)
+#   acknowledge:        basenames of files with flagged properties that a
+#                       human has reviewed (e.g. pre-filtered ONT reads)
+#   kmer_review:        recorded review of a flagged k-mer heterozygosity
+#                       screen (status: accepted, reason, reviewer, date)
+#   method_override:    use a specific method_id instead of the automatic
+#                       policy; requires override_reason
+#
+# Unknown values are null. Never fill in values that have not been verified.
+
+samples:
+  PHBW8:
+    aliases: [EB2_PHBW8]
+    metadata:
+      g2f_line: PHBW8
+      germplasm_source: null
+      hifi_source_bams:
+        # Recorded from the project description; on-disk location and
+        # checksums not yet recovered (docs/audit_2026-10-10.md).
+        - m84109_240806_024441_s4.hifi_reads.bc2027.bam
+        - m84109_240611_191050_s2.hifi_reads.bc2088.bam
+      ont_source: null
+      notes: >
+        First validation sample. Legacy hifiasm v0.25.0 runs are preserved
+        under hifiasm_v0.25.0/ (see docs/legacy/PHBW8_legacy_runs.yaml).
+    exclude_inputs: {}
+    acknowledge: {}
+    # Example (uncomment only after human review of the actual file):
+    # acknowledge:
+    #   PHBW8_ONT_gt50kb.fastq.gz:
+    #     prefiltered_ont: >
+    #       Legacy ONT file already filtered to >50 kb; raw ONT reads not
+    #       located. Raw yield cannot be reported.

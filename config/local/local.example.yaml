@@ -1,0 +1,15 @@
+# Example machine-specific configuration. Copy to config/local/local.yaml.
+
+# Read-only references to inputs outside data/. Keys are canonical sample IDs.
+external_inputs:
+  PHBW8:
+    hifi:
+      - /workdir/naj49/g2f_assemblies_2024/EB2_PHBW8.hifi.fasta.gz
+    ont:
+      - /workdir/naj49/g2f_assemblies_2024/PHBW8_ONT_gt50kb.fastq.gz
+
+# Offline BUSCO lineage datasets (contains poales_odb12/, liliopsida_odb10/).
+busco_lineage_dir: /home/naj49/busco_downloads/lineages
+
+# Where pbtk.sif lives (see README).
+containers_dir: /workdir/naj49/containers

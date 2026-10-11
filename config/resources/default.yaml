@@ -1,0 +1,27 @@
+# Computational settings only. Changing these must never change results.
+# Threads are upper bounds per job; Snakemake also caps them at --cores.
+# mem_mb values are scheduling hints for Snakemake's --resources limit and
+# for cluster profiles; they are based on observed PHBW8 peak RSS where known.
+#
+# Do not assume the whole server is yours: on shared BioHPC machines, keep
+# the total --cores and --resources mem_mb within your reservation.
+
+# Temporary directory for tools that honour TMPDIR (relative to pipeline/).
+tmpdir: ../tmp
+
+rules:
+  default:        {threads: 1,  mem_mb: 4000}
+  checksum:       {threads: 1,  mem_mb: 1000}
+  hifi_bam_to_fastq: {threads: 8, mem_mb: 8000}
+  bam_record_count:  {threads: 4, mem_mb: 4000}
+  read_stats:     {threads: 4,  mem_mb: 8000}
+  ont_filter:     {threads: 4,  mem_mb: 8000}
+  meryl_count:    {threads: 32, mem_mb: 200000}
+  # PHBW8 legacy: HiFi-only peak RSS 66 GB; HiFi+ONT peak RSS 134 GB.
+  hifiasm_hifi:   {threads: 64, mem_mb: 100000}
+  hifiasm_hifi_ont: {threads: 64, mem_mb: 180000}
+  gfa_to_fasta:   {threads: 1,  mem_mb: 8000}
+  validate_fasta: {threads: 1,  mem_mb: 8000}
+  assembly_stats: {threads: 4,  mem_mb: 8000}
+  busco:          {threads: 32, mem_mb: 64000}
+  merqury:        {threads: 16, mem_mb: 64000}
