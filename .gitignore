@@ -17,6 +17,16 @@
 *.bin
 *.sif
 *.meryl/
+*.sam
+*.cram
+*.crai
+*.blow5
+*.slow5
+*.h5
+*.paf
+*.tar
+*.tar.gz
+*.tgz
 
 # Local inputs and outputs (live outside pipeline/ by convention)
 data/
@@ -24,6 +34,11 @@ results/
 logs/
 scratch/
 tmp/
+busco_downloads/
+busco_*/
+nohup.out
+*.stdout.log
+*.stderr.log
 
 # Machine-specific configuration
 config/local/*
@@ -38,3 +53,16 @@ __pycache__/
 # Local agent preferences
 CLAUDE.local.md
 .claude/settings.local.json
+
+# Credentials and environment files
+.env
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+.netrc
+
+# OS / editor files
+.DS_Store
+*.swp
+*~
