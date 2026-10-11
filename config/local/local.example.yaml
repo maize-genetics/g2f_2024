@@ -1,15 +1,18 @@
-# Example machine-specific configuration. Copy to config/local/local.yaml.
+# Example machine-specific configuration. Copy to config/local/local.yaml
+# (untracked) and edit.
 
-# Read-only references to inputs outside data/. Keys are canonical sample IDs.
-external_inputs:
-  PHBW8:
-    hifi:
-      - /workdir/naj49/g2f_assemblies_2024/EB2_PHBW8.hifi.fasta.gz
-    ont:
-      - /workdir/naj49/g2f_assemblies_2024/PHBW8_ONT_gt50kb.fastq.gz
+# Optional read-only references to read files that live outside data/ (for
+# example on another filesystem). Keys are canonical sample IDs; paths must be
+# absolute. Most users leave this empty and place reads in data/<LINE>/.
+external_inputs: {}
+#  LINE_ID:
+#    hifi:
+#      - /path/to/LINE_ID.hifi_reads.bam
+#    ont:
+#      - /path/to/LINE_ID.ont.fastq.gz
 
 # Offline BUSCO lineage datasets (must contain poales_odb12.2/).
-busco_lineage_dir: /home/naj49/busco_downloads/lineages
+busco_lineage_dir: /home/YOUR_USER/busco_downloads/lineages
 
 # Optional: where pbtk-3.5.0.sif lives if not ../containers (see README).
-# containers_dir: /workdir/naj49/g2f_assemblies_2024/containers
+# containers_dir: /workdir/YOUR_USER/g2f_assemblies_2024/containers

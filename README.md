@@ -1,45 +1,71 @@
-# G2F maize genome resource pipeline
+# G2F 2024 maize genome assemblies
 
-This is a Snakemake workflow that takes PacBio HiFi reads (and ONT reads,
-where present) through to validated hifiasm assemblies and publication-ready
-QC tables, for the nine Genomes to Fields maize lines.
+A reproducible Snakemake pipeline that turns PacBio HiFi reads (plus Oxford
+Nanopore reads, where available) into validated hifiasm genome assemblies
+and publication-ready QC tables. It is being used for nine Genomes to Fields
+(G2F) maize inbred lines: 3AZA1, FBLL, GEMS-0061, GEMS-0113, GEMS-0219,
+GEMS-0227, PHB47, PHBW8 and PHP02.
 
-It runs without any AI agent. Supporting documentation:
+* Every line goes through the same versioned methods: hifiasm v0.25.0 with
+  no haplotig purging (`-l0`), with ONT reads added as ultra-long reads when
+  present.
+* Every result records the inputs, parameters, tool versions and commands
+  that produced it.
+* PHBW8 is the first validation line.
 
-* Scientific decisions: `docs/scientific_decisions.md`.
-* Historical PHBW8 audit: `docs/audit_2026-10-10.md`.
-* Real-tool compatibility findings: `docs/realtools_validation_2026-10-11.md`.
-* Testing status of each component: `docs/validation_status.md`.
+The pipeline does not need an AI agent to run. Annotation (EDTA, GeneCAD,
+PlantCAD) and pangenome analyses are planned but **not yet implemented**;
+see [docs/planned_extensions.md](docs/planned_extensions.md).
 
-## Layout
+## Contents
+
+[Installation](#installation) · [Inputs](#inputs) ·
+[Running the pipeline](#running-the-pipeline) · [Workflow](#workflow) ·
+[Outputs](#outputs) · [Reproducing and rerunning](#reproducing-and-rerunning) ·
+[Documentation](#documentation)
+
+## Installation
+
+The pipeline is set up for Cornell BioHPC servers, where all tools are
+already installed. On other systems, see "Other sites" below.
+
+### 1. Lay out the project directory
+
+The repository is cloned as `pipeline/` inside a project directory on local
+`/workdir` storage. Reads and results live **next to** the repository,
+never inside it:
 
 ```text
 g2f_assemblies_2024/
-├── pipeline/            # this Git repository
-│   ├── config/          # config.yaml (wiring), science.yaml, methods/, samples.yaml,
-│   │                    # resources/, tools/, local/ (untracked machine settings)
-│   ├── workflow/        # Snakefile + rules/*.smk
-│   ├── scripts/         # g2f_tool.py CLI + g2f/ helper package (stdlib + PyYAML)
-│   ├── profiles/biohpc/ # Snakemake profile for running directly on a BioHPC server
-│   ├── tests/           # unit, fixture, dry-run and stub end-to-end tests
-│   └── docs/
-├── data/<LINE>/{hifi,ont}/   # put reads here (never modified)
-├── results/                  # all workflow outputs
-├── containers/               # pinned containers not provided by BioHPC (pbtk)
-├── tmp/                      # TMPDIR for jobs
-└── hifiasm_v0.25.0/          # legacy PHBW8 runs: read-only, registered for QC
+├── pipeline/          # this repository
+├── data/<LINE>/{hifi,ont}/   # input reads (never modified)
+├── results/           # all outputs (created by the pipeline)
+├── containers/        # pbtk container (step 3)
+├── tmp/               # temporary files for jobs
+└── hifiasm_v0.25.0/   # historical PHBW8 runs (cbsuxm01 only; read-only)
 ```
-
-## One-time setup (BioHPC)
 
 ```bash
-cd /workdir/$USER/g2f_assemblies_2024/pipeline
-module load python/3.12.7            # provides Snakemake 9.26.1 + PyYAML
-cp config/local/local.example.yaml config/local/local.yaml   # then edit
+mkdir -p /workdir/$USER/g2f_assemblies_2024 && cd /workdir/$USER/g2f_assemblies_2024
+git clone git@github.com:maize-genetics/g2f_2024.git pipeline
+mkdir -p data results containers tmp
+cd pipeline
 ```
 
-**pbtk 3.5.0** is needed only for HiFi BAM inputs. It is not a BioHPC
-module; pull it by digest (19 MB, already done on cbsuxm01):
+### 2. Load Snakemake and create the local configuration
+
+```bash
+module load python/3.12.7      # provides Snakemake 9.26.1 and PyYAML
+cp config/local/local.example.yaml config/local/local.yaml
+```
+
+Edit `config/local/local.yaml` and set `busco_lineage_dir` to where BUSCO
+datasets are stored. This file is machine-specific and is not tracked by Git.
+
+### 3. One-time downloads
+
+**pbtk 3.5.0** is needed only for HiFi BAM input. It is not a BioHPC module,
+so pull it pinned by digest (19 MB):
 
 ```bash
 mkdir -p ../containers ../tmp/apptainer_cache
@@ -47,230 +73,254 @@ APPTAINER_CACHEDIR=$PWD/../tmp/apptainer_cache apptainer pull ../containers/pbtk
   docker://quay.io/biocontainers/pbtk@sha256:ab2d8dcf1a80e2d7595ab8799c37037766db6fb35d6744440b4643f27749e0ab
 ```
 
-**BUSCO lineage `poales_odb12.2`** must be installed under
-`busco_lineage_dir` (about 1 GB; needs network access):
+**BUSCO lineage `poales_odb12.2`** (about 1 GB):
 
 ```bash
 apptainer exec --bind /home/$USER/busco_downloads /programs/busco-6.1.0/busco.sif \
   busco --download_path /home/$USER/busco_downloads --download poales_odb12.2
-cat /home/$USER/busco_downloads/lineages/poales_odb12.2/dataset.cfg   # check against science.yaml pins
+cat /home/$USER/busco_downloads/lineages/poales_odb12.2/dataset.cfg   # compare with config/science.yaml
 ```
 
-`config/tools/biohpc.yaml` lists the remaining tools: hifiasm 0.25.0,
-seqkit 2.13.0, samtools 1.20, the Merqury 1.3 container (which also provides
-meryl), and the BUSCO 6.1.0 container. For another site, copy that file and
-point `tools:` in `config/config.yaml` at the copy.
+The pipeline checks the installed dataset against the release pinned in
+`config/science.yaml` and refuses a different one.
+
+### 4. Check the installation
+
+```bash
+bash tests/run_tests.sh          # synthetic data and stub tools; about 1.5 min
+```
+
+### Dependencies
+
+| Tool | Version | On BioHPC |
+|---|---|---|
+| Snakemake | ≥ 8 (tested 9.26.1) | `module load python/3.12.7` |
+| Python + PyYAML | 3.12 | same module |
+| hifiasm | 0.25.0-r726 (checked at run time) | `/programs/hifiasm-0.25.0` |
+| seqkit | 2.13.0 | `/programs/seqkit-2.13.0` |
+| samtools | 1.20 | `/programs/samtools-1.20` |
+| pbtk (`bam2fastq`, `pbindex`) | 3.5.0 | container, step 3 |
+| meryl + Merqury | Merqury 1.3 | `/programs/merqury-1.3/merqury.sif` |
+| BUSCO | 6.1.0 (checked at run time) | `/programs/busco-6.1.0/busco.sif` |
+| Apptainer | any recent | installed |
+
+**Other sites.** Tool locations are kept in `config/tools/biohpc.yaml`.
+Copy it, change the paths, and point `tools:` in `config/config.yaml` at
+the copy. Scientific settings do not change.
 
 ## Inputs
 
-Place reads in `data/<LINE>/hifi/` and, if available, `data/<LINE>/ont/`.
-The directory name is the canonical sample ID.
+Put each line's reads in its own directory. **The directory name is the
+line's ID.**
 
-**HiFi formats**
-* `*.bam`: unaligned PacBio `hifi_reads` BAM with `READTYPE=CCS`.
-* `*.fastq[.gz]`, `*.fq[.gz]`, `*.fasta[.gz]`, `*.fa[.gz]`: PacBio CCS read
-  names are expected.
-
-**ONT formats**
-* Basecalled `*.fastq[.gz]` or `*.bam`.
-* POD5/FAST5 files are rejected with a "basecalling required" message.
-
-**Multiple files**
-* Several files per technology are fine: multiple SMRT cells, flow cells, or
-  split basecaller output.
-* `.pbi`, `.bai`, `.xml`, `.md5`, `.txt` and similar files are ignored.
-* Any other unrecognised file stops the workflow.
-
-**Files that live elsewhere** (e.g. the legacy PHBW8 reads) are listed as
-read-only absolute paths under `external_inputs` in
-`config/local/local.yaml`. Nothing is copied or moved.
-
-**Sample metadata and human decisions** (aliases, exclusions,
-acknowledgements, k-mer reviews, method overrides) go in the tracked
-`config/samples.yaml`.
-
-### What stops the workflow
-
-When any of the following is found, the workflow stops and prints the exact
-`samples.yaml` entry that would resolve it:
-
-* the same data appearing twice (identical copies, a FASTQ/FASTA sharing
-  PacBio movies with a BAM, ONT files sharing read IDs, the same file under
-  two samples);
-* non-HiFi PacBio data (subreads, `fail_reads`, by-strand CCS);
-* HiFi read names that cannot be verified as CCS names;
-* ONT files that look already length-filtered;
-* malformed, empty or unknown files;
-* inputs that changed after results were built from them.
-
-## Usage
-
-All commands are run from `pipeline/` after `module load python/3.12.7`.
-
-```bash
-# 1. Review what will be used (reads only the first records of each file; seconds)
-python3 scripts/g2f_tool.py discover
-python3 scripts/g2f_tool.py discover --only PHBW8
-
-# 2. Run the test suite (synthetic data, stub tools; about 1.5 minutes)
-bash tests/run_tests.sh
-#    plus real-tool compatibility (real pbtk, hifiasm, meryl, Merqury, BUSCO on 300 kb data; ~75 s)
-G2F_REALTOOLS=1 bash tests/run_tests.sh test_realtools
-
-# 3. Dry run: show every job and the exact shell commands, without running anything
-snakemake --profile profiles/biohpc --dry-run --printshellcmds
-
-# 4a. Read preprocessing, read QC and k-mer screen only (no assembly)
-snakemake --profile profiles/biohpc --cores 32 reads_qc
-
-# 4b. QC of the registered historical assemblies only (no reads, no assembly)
-snakemake --profile profiles/biohpc --cores 32 imported_qc
-
-# 4c. Full workflow (start it inside screen; hifiasm takes hours)
-screen -S g2f
-snakemake --profile profiles/biohpc --cores 64
+```text
+data/
+├── PHBW8/
+│   ├── hifi/   EB2_PHBW8.hifi.fasta.gz
+│   └── ont/    PHBW8_ONT_gt50kb.fastq.gz
+├── PHB47/
+│   ├── hifi/   (reads not yet added)
+│   └── ont/
+└── ...
 ```
 
-* **Subset of samples:** add `--config only_samples=PHBW8` (comma-separated
-  for several).
-* **Concurrency limits:** `--cores` caps total threads. Set `resources:
-  mem_mb` in the profile to match your memory reservation.
+* **`hifi/` (required):** PacBio HiFi reads, either unaligned `hifi_reads`
+  BAM or FASTQ/FASTA (optionally gzipped). Several files (SMRT cells) are
+  fine.
+* **`ont/` (optional):** basecalled ONT FASTQ or BAM. If it has reads, the
+  HiFi+ONT method is used; if it is empty or missing, the HiFi-only method
+  is used. POD5/FAST5 must be basecalled first.
+* **Empty line directories** are skipped, each with a `NO_INPUTS` warning,
+  so a missing line is never mistaken for a processed one. Asking for such a
+  line by name (below) is an error.
+* **Line metadata and human decisions** (aliases, excluded files, reviewed
+  warnings) are recorded in `config/samples.yaml`.
 
-### Expected resources (from PHBW8, about 37× HiFi)
+Review what the pipeline will use before running anything. This reads only
+the first records of each file and takes seconds:
 
-| Step | Threads | Memory | Time | Notes |
-|---|---|---|---|---|
-| hifiasm, HiFi only | 64 (configurable) | ~66 GB | ~3 h at 100–120 threads | |
-| hifiasm, HiFi + ONT | 64 (configurable) | ~134 GB | ~4 h at 100 threads | |
-| meryl k = 21 | 32 | up to 200 GB (configured) | not yet measured | |
-| BUSCO (2.3 Gb assembly) | 32 | 64 GB requested | minutes | Legacy `liliopsida_odb10` runs took ~3 min at 40 CPUs; `poales_odb12.2` is larger, so somewhat longer is expected |
-| GFA/FASTA check, seqkit stats (2.2 GB) | 1–4 | ≤ 8 GB | minutes | Reads both files once |
-| HiFi read stats + MD5 (28 GB) | 4 + 1 | ≤ 8 GB | not yet measured (expected tens of minutes) | Streaming passes |
-| Merqury | 16 | — | not yet measured | Needs the meryl database |
+```bash
+python3 scripts/g2f_tool.py discover
+python3 scripts/g2f_tool.py discover --only PHBW8
+```
 
-Disk use is roughly 35–40 GB of hifiasm intermediates per assembly, plus the
-meryl database.
+The pipeline stops, with an explanation, on anything ambiguous: duplicated
+data, non-HiFi PacBio reads, ONT files that look already filtered, malformed
+files, or inputs that changed after results were built. See
+[docs/reference.md](docs/reference.md#inputs).
 
-Thread and memory settings are in `config/resources/default.yaml`. They
-never change results.
+## Running the pipeline
 
-## Outputs (`results/<LINE>/`)
+Run every command from `pipeline/` after `module load python/3.12.7`.
+**Always dry-run first.** Long runs belong inside `screen`, so they survive
+an SSH disconnect.
 
-| Path | Contents |
+```bash
+# Dry run: list every job and its exact shell command; runs nothing
+snakemake --profile profiles/biohpc --dry-run --printshellcmds
+
+# Read QC only: read preprocessing, read statistics, checksums, k-mer screen; no assembly
+snakemake --profile profiles/biohpc --cores 32 reads_qc
+
+# One line
+snakemake --profile profiles/biohpc --cores 64 --config only_samples=PHBW8
+
+# Several lines (comma-separated; each must have reads in data/)
+snakemake --profile profiles/biohpc --cores 64 --config only_samples=PHBW8,PHB47
+
+# Everything that has reads
+screen -S g2f
+snakemake --profile profiles/biohpc --cores 64
+
+# QC of the registered historical PHBW8 assemblies only (read-only)
+snakemake --profile profiles/biohpc --cores 32 imported_qc
+```
+
+* `only_samples` combines with any target, for example
+  `reads_qc --config only_samples=PHBW8`.
+* Naming a line without reads fails with `REQUESTED_SAMPLE_NO_INPUTS` and
+  runs nothing.
+* Re-running the same command resumes where it stopped. Finished work is
+  never repeated.
+
+### BioHPC execution profile
+
+`profiles/biohpc/config.yaml` runs jobs directly on the server you are
+logged into; it does not submit them to Slurm. It:
+
+* sets `--cores 32` (override with `--cores`);
+* re-runs jobs only when inputs are newer than outputs
+  (`rerun-triggers: mtime`), so editing code or parameters never silently
+  re-runs an assembly;
+* keeps temporary files in `../tmp`, not the shared `/tmp`.
+
+On a shared machine, set `--cores` to what you have reserved, and uncomment
+`resources: mem_mb=...` in the profile to cap memory. A HiFi+ONT hifiasm
+run of a maize line needs about 134 GB RAM, around 4 h at 100 threads, and
+35–40 GB of disk. Per-step estimates are in
+[docs/reference.md](docs/reference.md#expected-resources). Thread and memory
+settings are in `config/resources/default.yaml` and never affect results.
+
+## Workflow
+
+```mermaid
+flowchart TD
+    IN["data/LINE/hifi + ont"] --> DISC["Input discovery<br/>inventory, checksums, method choice"]
+    DISC --> HIFI["HiFi read QC<br/>BAM to FASTQ, read statistics"]
+    DISC --> ONT["ONT read QC<br/>reads ≥ 50 kb, statistics"]
+    HIFI --> KMER["k-mer counting<br/>meryl, k = 21"]
+    KMER --> SCREEN["k-mer screen<br/>diagnostic only"]
+    HIFI --> ASM["Assembly<br/>hifiasm 0.25.0 -l0"]
+    ONT -->|"if ONT present (--ul)"| ASM
+    ASM --> FA["GFA to FASTA<br/>+ consistency check"]
+    FA --> STATS["Contiguity<br/>seqkit"]
+    FA --> BUSCO["Gene-space completeness<br/>BUSCO poales_odb12.2"]
+    FA --> MERQ["Base accuracy<br/>Merqury QV"]
+    KMER --> MERQ
+    STATS --> SUM["Validated summary tables"]
+    BUSCO --> SUM
+    MERQ --> SUM
+    SCREEN --> SUM
+```
+
+| Stage | What it does | Why |
+|---|---|---|
+| Input discovery | Identifies every read file, detects duplicates and derived copies, records file identities and MD5s, and chooses the method (HiFi-only or HiFi+ONT) | Inputs are explicit, never double-counted, and cannot change silently under existing results |
+| HiFi read QC | Converts BAMs with pbtk, and measures yield, length, quality and coverage | Confirms the reads are HiFi and sufficient before hours of assembly |
+| ONT read QC | Keeps reads ≥ 50 kb for hifiasm `--ul` and reports what was kept | Only long reads improve contiguity; yields are reported, not assumed |
+| k-mer counting and screen | Builds a meryl k-mer database and inspects the spectrum for unexpected heterozygosity | Confirms the line behaves as an inbred; the database is reused by Merqury |
+| Assembly | hifiasm v0.25.0 with `-l0` (no haplotig purging), plus `--ul` when ONT reads exist | Purging can discard real sequence in homozygous inbreds |
+| GFA to FASTA | Converts primary and alternate contigs, then checks every record against the GFA | Ensures the FASTA is exactly what hifiasm produced |
+| Contiguity | Contig count, N50, L50, GC, gaps; lists contigs < 1 Mb | Standard assembly statistics; small contigs are flagged for organelle and repeat follow-up |
+| BUSCO | Completeness against the pinned `poales_odb12.2` dataset | Gene-space completeness. Duplication is not read as haplotig retention, because maize has an ancient genome duplication |
+| Merqury | Consensus quality (QV) and k-mer completeness from the reads | Reference-free accuracy estimate |
+| Summaries | Per-line and project tables built only from validated records | Every reported number is traceable |
+
+The scientific reasoning behind each choice is in
+[docs/scientific_decisions.md](docs/scientific_decisions.md).
+
+## Outputs
+
+Everything is written under `../results/`. The main paths for a line:
+
+| What | Where |
 |---|---|
-| `inputs/inventory.json`, `inputs/md5/` | Input identities, selected method and why, full-file MD5s |
-| `reads/hifi/stats/*.json`, `reads/hifi/hifi_reads.validated.json` | HiFi yield, length and quality distributions, movie census, coverage |
-| `reads/ont/stats/`, `reads/ont/ul50000/` | Raw and retained ONT QC, filtered reads, merged `--ul` file, validation |
-| `kmer/` | meryl database, histogram, screen, gate |
-| `assembly/<method_id>/` | hifiasm outputs and logs, `<LINE>.<method_id>.{p_ctg,a_ctg}.fa` (write-protected), GFA/FASTA checks |
-| `qc/<method_id>/` | seqkit stats, per-contig table, small-contig list, BUSCO, Merqury, validation records |
-| `provenance/<step>/*.json` | Per-job execution record: command, tool versions, inputs/outputs, host, timing, Git commit, status (kept on failure) |
-| `summary/<LINE>.<method_id>.summary.<VID>.<SID>.tsv` | Per-sample summary |
-| `summary/<LINE>.<method_id>.validated.<VID>.<SID>.json` | Completion marker, written only after every validation passes |
-| `imported/<id>/`, `qc/imported-<id>/` | Links to registered historical assemblies (read-only) and their QC |
+| Assembly FASTA (write-protected) | `results/<LINE>/assembly/<method_id>/<LINE>.<method_id>.p_ctg.fa` (and `.a_ctg.fa`) |
+| hifiasm outputs and logs | `results/<LINE>/assembly/<method_id>/` |
+| Read QC | `results/<LINE>/reads/hifi/`, `results/<LINE>/reads/ont/` |
+| k-mer database, histogram, screen | `results/<LINE>/kmer/` |
+| QC reports (seqkit, BUSCO, Merqury) | `results/<LINE>/qc/<method_id>/` |
+| Provenance (command, versions, inputs, host, time, Git commit) | `results/<LINE>/provenance/<step>/*.json` |
+| Input inventory and checksums | `results/<LINE>/inputs/` |
+| Per-line summary and completion marker | `results/<LINE>/summary/` |
+| Project tables | `results/summary/assembly_summary.<VID>.<PID>.tsv` (workflow assemblies), `results/summary/imported_assemblies_summary.<VID>.<PID>.tsv` (historical assemblies, kept separate) |
 
-The project tables are built from validated records only:
+* **Completion.** A line is finished only when its `*.validated.<VID>.<SID>.json`
+  marker exists, which is written after every check passes. Output files
+  existing is not enough.
+* **Identity tags.** `VID` identifies the scientific configuration and
+  validation code; `SID`/`PID` identify the recorded human decisions. Older
+  tables are kept when either changes.
+* **Full listing.** See
+  [docs/reference.md](docs/reference.md#outputs-resultsline).
 
-* `results/summary/assembly_summary.<VID>.<PID>.tsv`: assemblies produced by
-  this workflow.
-* `results/summary/imported_assemblies_summary.<VID>.<PID>.tsv`: historical
-  assemblies, kept separate.
+## Reproducing and rerunning
 
-**Name components**
+**Reproduce a previous analysis.**
 
-* `VID` is the validation identity: `science.yaml`, the method definitions
-  and the validation code. `results/.identity/validation-<VID>.json` lists
-  what it is made of.
-* `SID` / `PID` hash the human decisions in `samples.yaml`, for one sample
-  or for the whole set.
-* The newest file is the current one. A file with an older identity was
-  validated under older settings and is kept for the record.
+1. Each provenance record holds the pipeline Git commit (and whether the
+   working tree was clean), the exact command, tool versions and input
+   identities. `results/.identity/validation-<VID>.json` lists the
+   configuration a summary was validated under.
+2. Check out that commit, keep the same `data/`, and rerun into a separate
+   results directory so the original results are untouched:
 
-### Work states
+   ```bash
+   git checkout <commit>
+   snakemake --profile profiles/biohpc --dry-run --config results_dir=/workdir/$USER/g2f_rerun only_samples=PHBW8
+   ```
 
-Snakemake tracks job states. Our part:
+   Compare the new `inputs/inventory.json` and `inputs/md5/` with the
+   original ones to confirm the same reads were used. The tool versions
+   required by each method are checked when jobs run.
 
-* **Failed jobs** keep their provenance record, with `status: failed`.
-* **Incomplete jobs** are flagged by Snakemake on the next run.
-* **Completed work** has its outputs present.
-* **Validated work** has the `*.validated.json` marker.
+**Rerun a single QC component.** BUSCO, Merqury and contiguity statistics
+can be regenerated, or extended (for example with an extra BUSCO lineage),
+without repeating read QC or hifiasm. Previous results are kept. See
+[docs/rerunning_qc.md](docs/rerunning_qc.md) for the commands, a guard that
+prevents an accidental assembly, and current limitations. The main
+limitation is that the BUSCO version is not yet part of the output path.
 
-`snakemake --summary` lists the state of every output.
+**Changing scientific parameters.** Assembly parameters live in immutable
+files in `config/methods/`. To change them, create a new method file with a
+new `method_id`; its results go to a separate directory. Editing a method
+that has already been used is refused.
 
-## Resumability, reruns and safety
+## Documentation
 
-* **Resuming.** Re-running the same command continues where it stopped.
-  Checksums and full-file read statistics are computed once and reused.
-* **Resource changes** (threads, memory, tmpdir, tool paths) never re-run
-  anything.
-* **Science, method and validation-code changes.** The profile uses
-  `--rerun-triggers mtime`, so expensive jobs never re-run silently.
-  Instead:
-  * A changed `science.yaml` or validation code gives a new validation
-    identity. Only cheap validation and summary jobs re-run, and they write
-    summaries under new names. Assemblies, k-mer counting, BUSCO and Merqury
-    are not repeated.
-  * Assembly parameters live in immutable method files. Editing a method
-    file that has already been used is refused; create a new `method_id`
-    instead, which writes to a new results directory.
-  * Tool versions required by a method are checked at run time.
-* **Write protection.** Assembly GFA and FASTA files are write-protected;
-  Snakemake refuses to overwrite them.
-* **Failed jobs.** Snakemake removes their outputs, and the provenance
-  record keeps `status: failed`. hifiasm refuses to start while `.bin` files
-  from a failed attempt exist; inspect them and move them aside.
-* **Changed inputs.** If a sample's inputs or acknowledgements change after
-  results exist, the workflow refuses to run. Move `results/<LINE>/` aside
-  to reprocess that sample.
-* **Historical files.** A registered historical file that changes after
-  import makes the workflow refuse to run.
-
-## Adding a maize line
-
-1. `mkdir -p ../data/<LINE>/{hifi,ont}` and place the reads there. Omit
-   `ont/` if there are no ONT data.
-2. Optionally add a `samples.yaml` entry (aliases, metadata).
-3. Run `python3 scripts/g2f_tool.py discover --only <LINE>` and resolve any
-   reported issue.
-4. Dry-run, then run, as above. The same versioned methods apply
-   automatically.
-
-## Common failures
-
-| Message | Meaning and fix |
+| Document | Contents |
 |---|---|
-| `ONT_POSSIBLY_PREFILTERED` | Every sampled read is ≥ 50 kb. Supply the raw basecalled reads, or acknowledge the file in `samples.yaml` |
-| `HIFI_POSSIBLE_DERIVED_COPY` / `DUPLICATE_COPY` | Two inputs contain the same reads. Exclude one, with a reason |
-| `RAW_SIGNAL` | POD5/FAST5 found. Basecall them separately |
-| `WARNING: k-mer screen flagged …` | A diagnostic only; assembly continues. Inspect `kmer/*.hist` and, if appropriate, record a `kmer_review` in `samples.yaml` |
-| `WARNING: BUSCO lineage poales_odb12.2 is not installed` | Download it (see "One-time setup") |
-| `lineage … pinned dataset requires …` | The installed BUSCO dataset is not the pinned release |
-| `was changed after it was used` | A method file was edited in place. Restore it, or create a new `method_id` |
-| `read statistics were produced by different read-statistics code` | Regenerate the statistics with `--forcerun hifi_read_stats ont_input_stats ont_filtered_stats` |
-| `Refusing to run: hifiasm: expected version` | The tools config points at a different hifiasm build |
-| `Refusing to start: intermediate hifiasm .bin files` | A previous attempt left files behind. Move them aside |
-| `Write-protected output files` | A finished assembly would be overwritten. Use a new `method_id`, or deliberately move the old result |
+| [docs/reference.md](docs/reference.md) | Input rules, resources, full output list, rerun and safety rules, error messages |
+| [docs/rerunning_qc.md](docs/rerunning_qc.md) | Rerunning BUSCO, Merqury and statistics independently |
+| [docs/scientific_decisions.md](docs/scientific_decisions.md) | Scientific choices and their justification |
+| [docs/validation_status.md](docs/validation_status.md) | Which components are validated on real data |
+| [docs/historical_assemblies.md](docs/historical_assemblies.md) | The manual PHBW8 assemblies that preceded the pipeline |
+| [docs/qc_PHBW8_imported_2026-10-11.md](docs/qc_PHBW8_imported_2026-10-11.md) | First pipeline QC of the historical PHBW8 assembly |
+| [docs/audit_2026-10-10.md](docs/audit_2026-10-10.md), [docs/realtools_validation_2026-10-11.md](docs/realtools_validation_2026-10-11.md) | Audit and tool-compatibility records |
+| [docs/planned_extensions.md](docs/planned_extensions.md) | Planned annotation and pangenome modules |
+| [AGENTS.md](AGENTS.md) | Project principles and rules for developers and AI assistants |
 
-## Downstream annotation (planned, not implemented)
+### Repository layout
 
-EDTA (repeats), geneCAD (genes), PlantCAD/PlantCAD2 (CREs) and comparative
-or pangenome analyses will be added as further rule files
-(`workflow/rules/annotation_*.smk`) in this same workflow. They will follow
-the conventions already used for assembly.
+```text
+config/     science.yaml, methods/ (immutable), samples.yaml, resources/, tools/, local/ (untracked)
+workflow/   Snakefile and rules/*.smk
+scripts/    g2f_tool.py command-line helper and the g2f/ Python package
+profiles/   Snakemake execution profile for BioHPC
+tests/      unit, fixture, dry-run and stub end-to-end tests
+docs/       documentation and decision records
+```
 
-**Inputs.** A module consumes only *validated* assemblies:
-
-* `asm_fasta(sample, method_id, "p_ctg")`, gated on that assembly's current
-  `validated_marker()`;
-* or imported assemblies, explicitly and labelled as such.
-
-**Methods.** Each annotation tool gets its own immutable method files, e.g.
-`config/methods/edta-<ver>_<params>_v1.yaml`, with an expected version that
-is checked when the job runs.
-
-**Outputs.** They go to
-`results/<LINE>/annotation/<assembly method_id>/<annotation method_id>/`,
-carry provenance records, and are summarized from validated records only.
-
-**Shared metadata.** Sample IDs, aliases, inventories and decisions come
-from the same `samples.yaml` and discovery code.
+Real-tool compatibility tests (real pbtk, hifiasm, meryl, Merqury and BUSCO
+on tiny synthetic data, about 2–4 min):
+`G2F_REALTOOLS=1 bash tests/run_tests.sh test_realtools`.

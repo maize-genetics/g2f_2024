@@ -19,6 +19,7 @@ not operational validation.
 | Component | Status | Still to validate on real data |
 |---|---|---|
 | Input discovery, duplicate/derived detection | Fixture-tested (20 tests). Run read-only on the real PHBW8 files: passes, with the approved acknowledgement | — |
+| Empty line directories (`NO_INPUTS` warning) and explicit requests for lines without reads (`REQUESTED_SAMPLE_NO_INPUTS` error) | Fixture-tested. Real layout (2026-10-11): 8 empty lines skipped with warnings; `only_samples=3AZA1` exits 1 | — |
 | Method selection, ONT policy, pre-filtered ONT used as supplied | Fixture-tested and stub-tested. PHBW8 dry run selects HiFi+ONT and uses the supplied ONT file directly | Full-file check that every PHBW8 ONT read is ≥ 50,000 bp |
 | HiFi BAM → FASTQ (pbtk 3.5.0) | Real-tool (synthetic BAM) | Real Revio BAMs (PHBW8 BAMs not located) |
 | HiFi/ONT read QC, checksums, movie census, ONT ID check | Real-tool (synthetic) | Run time and memory on 28 GB of HiFi |

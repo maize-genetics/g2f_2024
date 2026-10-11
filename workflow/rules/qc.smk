@@ -207,4 +207,4 @@ for _lin in busco_lineages():
     if _base and not os.path.isfile(os.path.join(os.path.expanduser(_base), _lin, "dataset.cfg")):
         sys.stderr.write(
             f"WARNING: BUSCO lineage {_lin} is not installed under {_base}; BUSCO jobs will fail "
-            "until it is downloaded (see README, 'One-time setup').\n")
+            "until it is downloaded (see README, 'Installation').\n")
