@@ -60,6 +60,33 @@ class DiscoveryTest(unittest.TestCase):
         self.assertEqual(codes(issues), [])
         self.assertEqual(discovery.select_method("S1", inputs["S1"], cfg)[0], HIFI_ONLY)
 
+    def test_empty_sample_dir_is_skipped_with_warning(self):
+        d = mkdirs(self.tmp, "S1")
+        write_fastq(f"{d['hifi']}/a.fastq.gz", hifi_names(M1, 10), [12000] * 10)
+        mkdirs(self.tmp, "S2", ("hifi", "ont"))
+        _, inputs, issues = self.run_discover()
+        self.assertEqual(codes(issues), [])
+        self.assertEqual(codes(issues, "warning"), ["NO_INPUTS"])
+        self.assertNotIn("S2", inputs)
+
+    def test_requested_sample_without_inputs_is_error(self):
+        d = mkdirs(self.tmp, "S1")
+        write_fastq(f"{d['hifi']}/a.fastq.gz", hifi_names(M1, 10), [12000] * 10)
+        mkdirs(self.tmp, "S2", ("hifi", "ont"))
+        cfg = make_cfg(self.tmp)
+        cfg["external_assemblies"] = {"S4": {}}
+        for only, expect in ((["S2"], ["REQUESTED_SAMPLE_NO_INPUTS"]),      # empty dir
+                             (["S3"], ["REQUESTED_SAMPLE_NO_INPUTS"]),      # no dir
+                             (["S1", "S2"], ["REQUESTED_SAMPLE_NO_INPUTS"]),
+                             (["S4"], []),                     # historical assembly only
+                             (["S1"], [])):
+            cfg["only_samples"] = only
+            inputs, issues = discovery.discover(cfg)
+            self.assertEqual(codes(issues), expect, only)
+        self.assertEqual(codes(issues, "warning"), [])   # S2 not requested: no warning
+        cfg["only_samples"] = ["S4"]
+        self.assertEqual(codes(discovery.discover(cfg)[1], "warning"), ["NO_INPUTS"])
+
     def test_no_hifi_is_error(self):
         d = mkdirs(self.tmp, "S1", ("ont",))
         write_fastq(f"{d['ont']}/a.fastq.gz", ont_names(5), [60000] * 5)

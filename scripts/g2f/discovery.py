@@ -470,6 +470,36 @@ def discover(cfg):
                     candidates.append((sample, tech, os.path.basename(p), p, "external"))
 
     only = set(cfg.get("only_samples") or [])
+    # Sample directories with no files yet (e.g. data still in transfer) are
+    # skipped, but reported so a run never silently omits a sample.
+    # A sample requested explicitly (only_samples) that has no reads is an
+    # error, unless it has a registered historical assembly (imported_qc).
+    with_files = {c[0] for c in candidates}
+    if os.path.isdir(data_dir):
+        for sample in sorted(os.listdir(data_dir)):
+            if (sample.startswith(".") or sample in with_files or sample in only
+                    or not os.path.isdir(os.path.join(data_dir, sample))
+                    or (only and sample not in only)):
+                continue
+            issues.append(Issue("warning", "NO_INPUTS", sample,
+                                "sample directory contains no files; sample skipped",
+                                "Add reads to hifi/ (and ont/ if available).",
+                                [os.path.join(data_dir, sample)]))
+    imported = cfg.get("external_assemblies") or {}
+    for sample in sorted(only - with_files):
+        where = os.path.join(data_dir, sample)
+        if sample in imported:
+            issues.append(Issue("warning", "NO_INPUTS", sample,
+                                "requested sample has no reads; only its registered "
+                                "historical assemblies (imported_qc) can be processed",
+                                "Add reads to hifi/ (and ont/ if available).", [where]))
+        else:
+            issues.append(Issue("error", "REQUESTED_SAMPLE_NO_INPUTS", sample,
+                                "sample requested in only_samples has no read files "
+                                + ("(directory is empty)" if os.path.isdir(where)
+                                   else "(no such sample directory)"),
+                                "Add reads to hifi/ (and ont/ if available), or remove it "
+                                "from only_samples.", [where]))
     seen_paths = {}
     for sample, tech, key, path, source in candidates:
         if only and sample not in only:
