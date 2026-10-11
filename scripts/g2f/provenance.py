@@ -12,6 +12,7 @@ import datetime
 import getpass
 import json
 import os
+import resource
 import socket
 import subprocess
 import sys
@@ -97,7 +98,16 @@ def run_step(prov, step, command, sample=None, method=None, version_cmds=None, e
         sys.stderr.write("Refusing to run: " + "; ".join(mismatches) + "\n")
         return 3
     write_json(prov, {**rec, "status": "running"})
+    before = resource.getrusage(resource.RUSAGE_CHILDREN)
     rc = subprocess.run(["bash", "-euo", "pipefail", "-c", command]).returncode
+    after = resource.getrusage(resource.RUSAGE_CHILDREN)
+    # ru_maxrss (KiB on Linux) is the peak RSS of the largest waited-for
+    # descendant process (not the sum over a pipeline); CPU times are summed.
+    rec["resource_usage"] = {
+        "max_rss_gb_largest_process": round(after.ru_maxrss / 1024 ** 2, 3),
+        "cpu_user_seconds": round(after.ru_utime - before.ru_utime, 1),
+        "cpu_system_seconds": round(after.ru_stime - before.ru_stime, 1),
+    }
     rec.update(end=_now(), wall_seconds=round(time.time() - t0, 1), exit_code=rc,
                status="completed" if rc == 0 else "failed",
                outputs=[_file_info(p) for p in outputs])

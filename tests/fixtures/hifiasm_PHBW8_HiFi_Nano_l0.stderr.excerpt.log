@@ -3,6 +3,7 @@
 [M::ha_pt_gen] peak_hom: 73; peak_het: 37
 [M::ha_pt_gen] peak_hom: 73; peak_het: 37
 [M::ha_pt_gen] peak_hom: 73; peak_het: 37
+[M::print_ovlp_src_bl_stat::] ==> # passed UL reads:12416, # fully corrected UL reads:6706, # almost fully corrected UL reads:482, # UL reads have primary chains:5168
 [M::purge_dups] homozygous read coverage threshold: 36
 [M::purge_dups] purge duplication coverage threshold: 46
 [M::purge_dups] homozygous read coverage threshold: 36

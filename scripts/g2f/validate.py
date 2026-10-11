@@ -326,6 +326,10 @@ def parse_hifiasm_log(path):
                 if m:
                     out["peaks"].append({"stage": m.group(1), "peak_hom": int(m.group(2)),
                                          "peak_het": int(m.group(3))})
+            elif "# passed UL reads:" in line:
+                m = re.search(r"# passed UL reads:(\d+)", line)
+                if m:
+                    out["ul_passed_reads"] = int(m.group(1))
             elif line.startswith("[M::purge_dups]"):
                 out["purge_dups"].append(line.split("]", 1)[1].strip())
     return out

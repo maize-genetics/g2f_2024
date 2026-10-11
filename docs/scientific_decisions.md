@@ -143,11 +143,12 @@ for a production assembly; create a new `method_id` instead.
     which BUSCO derives from the `dataset.cfg` name), `dataset.cfg`
     `creation_date: 2026-05-13`, and the BUSCO version 6.1.0.
   * **Enforcement:** every BUSCO validation checks these; a mismatch fails.
-  * **Still open:** `number_of_BUSCOs` is to be pinned after download. The
-    archive MD5 from BUSCO's `file_versions.tsv` is
-    `c2cf3a2db7a23f9b8c0d3d9af54c5132`.
-  * **Not installed yet.** The installed `poales_odb12` (OrthoDB 12.1,
-    created 2026-05-22) runs as `odb12` and is not this dataset.
+  * **Installed and verified (2026-10-11):** OrthoDB 12.2,
+    `dataset_version 01`, 6,188 BUSCOs, archive MD5
+    `c2cf3a2db7a23f9b8c0d3d9af54c5132` (checked by BUSCO at download). Every
+    field is pinned.
+  * The separately installed `poales_odb12` (OrthoDB 12.1, created
+    2026-05-22) runs as `odb12` and is not this dataset.
   * **Other lineages:** the historical `liliopsida_odb10` results are kept
     and labelled separately and are not re-run. Results from different
     lineages or releases are not interchangeable.
@@ -218,4 +219,3 @@ results labelled as valid, the workflow does the following.
 * Why do 127 complete BUSCOs contain internal stop codons?
 * How should the k-mer screen thresholds be calibrated once PHBW8 has a real
   histogram?
-* What is `number_of_BUSCOs` for `poales_odb12.2`? Pin it after download.

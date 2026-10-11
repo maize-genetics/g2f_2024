@@ -113,7 +113,10 @@ class WorkflowCase(unittest.TestCase):
         write_fasta(f"{s2['hifi']}/S2.hifi.fasta.gz", hifi_names(M3, 12), [4000] * 12, seed=5)
 
     def adjust_science(self):
-        pass
+        # The stub BUSCO reports a real odb10 result (3236 markers), so the
+        # stub tests pin only the fields their fake dataset.cfg provides.
+        self.science["qc"]["busco"]["lineages"] = {"poales_odb12.2": {
+            "datasets_version": "odb12.2", "creation_date": "2026-05-13"}}
 
     def lineage_dir(self):
         return os.path.join(self.tmp, "lineages")
@@ -219,6 +222,7 @@ class WorkflowTest(WorkflowCase):
         self.assertEqual(prov["status"], "completed")
         self.assertEqual(prov["tools"]["hifiasm"]["reported"], "0.25.0-r726")
         self.assertIn("--ul", prov["command"])
+        self.assertGreater(prov["resource_usage"]["max_rss_gb_largest_process"], 0)
         with open(f"{res}/S1/assembly/{HIFI_ONT}/S1.{HIFI_ONT}.method.json") as fh:
             self.assertEqual(json.load(fh)["fingerprint"], s1["method_fingerprint"])
         self.assertTrue(os.path.exists(

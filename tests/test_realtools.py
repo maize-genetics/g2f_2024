@@ -18,7 +18,7 @@ import unittest
 import yaml
 from realtools_data import build
 from test_workflow import HIFI_ONT, WorkflowCase, have_snakemake, unprotect
-from util import PIPELINE_DIR, SAMTOOLS
+from util import PIPELINE_DIR, SAMTOOLS  # noqa: F401  (also puts scripts/ on sys.path)
 
 LINEAGES = os.path.expanduser("~/busco_downloads/lineages")
 CONTAINERS = os.path.join(os.path.dirname(PIPELINE_DIR), "containers")
@@ -96,3 +96,39 @@ class RealToolsTest(WorkflowCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(ENABLED and os.path.exists("/programs/hifiasm-0.25.0/hifiasm"),
+                     "set G2F_REALTOOLS=1 (needs hifiasm 0.25.0)")
+class HifiasmMultipleUlFilesTest(unittest.TestCase):
+    """hifiasm 0.25.0 must consume every file of a comma-separated --ul list
+    (the workflow passes one file per ONT input instead of a merged copy)."""
+
+    def test_comma_separated_ul_files_are_all_consumed(self):
+        import subprocess
+        from realtools_data import genome, sample_reads, write_fastq
+        from g2f.validate import parse_hifiasm_log
+        hifiasm = "/programs/hifiasm-0.25.0/hifiasm"
+        base = os.environ.get("TMPDIR") or "/workdir/" + os.environ.get("USER", "") + "/tmp"
+        tmp = tempfile.mkdtemp(prefix="g2f_ul_", dir=base)
+        try:
+            g = genome()
+            hifi = sample_reads(g, 600, 15000, seed=1)
+            write_fastq(f"{tmp}/hifi.fastq.gz", [f"m84109_240101_000000_s1/{i}/ccs"
+                                                 for i in range(1, 601)], hifi)
+            ont = sample_reads(g, 25, 75000, seed=2)
+            write_fastq(f"{tmp}/a.fastq.gz", [f"a{i}" for i in range(10)], ont[:10], q="5")
+            write_fastq(f"{tmp}/b.fastq.gz", [f"b{i}" for i in range(15)], ont[10:], q="5")
+            counts = {}
+            for name, ul in (("A", "a"), ("B", "b"), ("AB", "a,b")):
+                d = f"{tmp}/{name}"
+                os.makedirs(d)
+                files = ",".join(f"{tmp}/{x}.fastq.gz" for x in ul.split(","))
+                with open(f"{d}/err.log", "w") as err:
+                    subprocess.run([hifiasm, "-o", "T", "-t", "2", "-l0", "--ul", files,
+                                    f"{tmp}/hifi.fastq.gz"], cwd=d, stderr=err,
+                                   stdout=subprocess.DEVNULL, check=True)
+                counts[name] = parse_hifiasm_log(f"{d}/err.log").get("ul_passed_reads")
+            self.assertEqual(counts, {"A": 10, "B": 15, "AB": 25})
+        finally:
+            shutil.rmtree(tmp)

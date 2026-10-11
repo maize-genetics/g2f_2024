@@ -48,6 +48,49 @@ was only 0.04. The screen now smooths the spectrum and requires secondary
 maxima to reach 5% of the main peak. The real spectrum is kept as a
 regression fixture (`tests/fixtures/meryl_k21_synthetic_homozygous_300kb.hist`).
 
+## Follow-up checks (2026-10-11, later the same day)
+
+### `poales_odb12.2` installed and verified
+
+* **Download:** `busco --download_path ~/busco_downloads --download
+  poales_odb12.2`, run from the BUSCO 6.1.0 container.
+  * The first attempt failed with "Read-only file system" because the
+    working directory was not bound into the container. It succeeded with
+    `--bind /workdir,/local/workdir`.
+  * BUSCO's downloader checks the archive MD5 (`c2cf3a2db7a23f9b8c0d3d9af54c5132`)
+    against `file_versions.tsv` and stops on a mismatch, so the successful
+    download means it matched.
+  * The four existing lineage directories were left unchanged.
+* **`dataset.cfg` contents:** `name=poales_odb12.2`, `OrthoDB_version=12.2`,
+  `dataset_version=01`, `creation_date=2026-05-13`, `number_of_BUSCOs=6188`,
+  `species=maize`.
+  * The directory holds 6,188 HMM profiles and 6,188 score cutoffs, matching
+    `number_of_BUSCOs`.
+  * All of these values are pinned in `science.yaml`.
+* **Compatibility:** an offline BUSCO 6.1.0 run with miniprot on the
+  synthetic genome reported `datasets_version: odb12.2` and n = 6188, and
+  passed every pin check.
+
+### hifiasm consumes every file of a comma-separated `--ul` list
+
+* **Setup:** two disjoint synthetic ONT FASTQs, A (10 reads) and B (15 reads),
+  with no shared read IDs.
+* **Result:** hifiasm 0.25.0-r726 reported `# passed UL reads` as:
+
+  | `--ul` value | Passed UL reads |
+  |---|---|
+  | `A` | 10 |
+  | `B` | 15 |
+  | `A,B` | 25 |
+  | `B,A` | 25 |
+
+* **Conclusion:** both files are read; it is not just a clean exit.
+* **Kept as a test:** `HifiasmMultipleUlFilesTest` in
+  `tests/test_realtools.py`.
+* **Recorded in summaries:** the passed-UL count from each hifiasm log, as
+  `hifiasm_ul_passed_reads`. For example, the legacy PHBW8 HiFi+ONT run
+  reports 12,416.
+
 ## Not validated by these tests
 
 * Behaviour and resource use at maize scale (2.3 Gb, 84 Gb of HiFi).

@@ -71,16 +71,21 @@ qc:
     expected_version: 6.1.0
     # Primary lineage, pinned so all assemblies use the same dataset release.
     # Every pinned field is checked against the lineage's dataset.cfg and the
-    # BUSCO result JSON; null fields are recorded but not enforced (fill them
-    # in once the dataset has been downloaded and inspected).
+    # BUSCO result JSON (archive_md5 is recorded only; BUSCO verifies it at
+    # download).
     # liliopsida_odb10 (historical) and poales_odb12 (OrthoDB 12.1 release,
     # created 2026-05-22) are NOT interchangeable with this dataset.
     lineages:
+      # Verified 2026-10-11 after download (busco --download poales_odb12.2;
+      # archive poales_odb12.2.2026-05-13.tar.gz, MD5 checked by BUSCO's
+      # downloader against file_versions.tsv). 6188 HMMs = 6188 score cutoffs.
       poales_odb12.2:
         datasets_version: odb12.2
-        creation_date: "2026-05-13"     # from BUSCO file_versions.tsv; verify after download
-        number_of_BUSCOs: null
-        archive_md5: c2cf3a2db7a23f9b8c0d3d9af54c5132   # file_versions.tsv entry
+        creation_date: "2026-05-13"
+        OrthoDB_version: "12.2"
+        dataset_version: "01"
+        number_of_BUSCOs: "6188"
+        archive_md5: c2cf3a2db7a23f9b8c0d3d9af54c5132
     mode: genome
     # Historical PHBW8 runs used miniprot (BUSCO mode euk_genome_min).
     gene_predictor: miniprot

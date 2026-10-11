@@ -286,6 +286,7 @@ class ValidateTest(unittest.TestCase):
         self.assertEqual(h["version"], "0.25.0-r726")
         self.assertIn("--ul", h["command"])
         self.assertEqual(h["peak_rss_gb"], 133.736)
+        self.assertEqual(h["ul_passed_reads"], 12416)
         self.assertEqual(h["peaks"][0], {"stage": "ha_ft_gen", "peak_hom": 37, "peak_het": -1})
         self.assertEqual(h["peaks"][1], {"stage": "ha_pt_gen", "peak_hom": 72, "peak_het": 36})
 

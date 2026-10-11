@@ -15,7 +15,7 @@ COLUMNS = [
     "busco_lineage", "busco_datasets_version", "busco_dataset", "busco_C", "busco_S", "busco_D",
     "busco_F", "busco_M", "busco_n", "busco_internal_stop_pct",
     "merqury_qv", "merqury_kmer_completeness_pct",
-    "hifiasm_version", "hifiasm_peak_rss_gb",
+    "hifiasm_version", "hifiasm_peak_rss_gb", "hifiasm_ul_passed_reads",
 ]
 
 
@@ -47,6 +47,7 @@ def build(sample, method_id, science_version, hifi, ont, kmer, asm_p, asm_a, bus
             "gc_pct": asm_p["gc_pct"], "gap_bp": asm_p["gap_bp"],
             "hifiasm_version": hifiasm_log.get("version"),
             "hifiasm_peak_rss_gb": hifiasm_log.get("peak_rss_gb"),
+            "hifiasm_ul_passed_reads": hifiasm_log.get("ul_passed_reads", ""),
         }
         if hifi:
             row.update(hifi_reads=hifi["total_reads"], hifi_bases=hifi["total_bases"],
