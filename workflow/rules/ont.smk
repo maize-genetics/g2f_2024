@@ -1,7 +1,13 @@
-# ONT preprocessing: raw read QC, ultra-long length filtering, merge for --ul.
+# ONT preprocessing: QC of each supplied file, ultra-long length filtering,
+# and the read list passed to hifiasm --ul.
 #
-# Inputs are basecalled FASTQ(.gz) or unaligned/aligned BAM (primary records
-# only); ONT FASTA is rejected at discovery because qualities are required. Raw signal (POD5/FAST5) is rejected at discovery.
+# Inputs are basecalled FASTQ(.gz) or BAM (primary records only); raw signal
+# (POD5/FAST5) and ONT FASTA are rejected at discovery.
+#
+# No unnecessary copies: hifiasm takes a comma-separated --ul file list, so
+# filtered files are never merged, and an acknowledged pre-filtered FASTQ is
+# used as supplied (after verifying every read meets the method threshold)
+# instead of being re-filtered into a duplicate.
 
 
 def ont_stream(s, iid, threads):
@@ -12,12 +18,43 @@ def ont_stream(s, iid, threads):
     return f"{tool('seqkit')} seq -j {threads} {q(i.path)}"
 
 
+def ont_used_as_supplied(s, iid):
+    i = get_input(s, "ont", iid)
+    return discovery.is_prefiltered(i) and i.format == "fastq"
+
+
+def ont_input_stats(s, iid):
+    return f"{RES}/{s}/reads/ont/stats/{iid}.input.json"
+
+
+def ont_input_ids(s, iid):
+    return f"{RES}/{s}/reads/ont/stats/{iid}.input_ids.tsv.gz"
+
+
 def ont_dir(s, minlen):
     return f"{RES}/{s}/reads/ont/ul{minlen}"
 
 
-def ont_merged(s, minlen):
-    return f"{ont_dir(s, minlen)}/{s}.ont_ul{minlen}.fastq.gz"
+def ont_ul_reads(s, iid, minlen):
+    if ont_used_as_supplied(s, iid):
+        return get_input(s, "ont", iid).path
+    return f"{ont_dir(s, minlen)}/{iid}.fastq.gz"
+
+
+def ont_retained_stats(s, iid, minlen):
+    if ont_used_as_supplied(s, iid):
+        return ont_input_stats(s, iid)
+    return f"{ont_dir(s, minlen)}/stats/{iid}.json"
+
+
+def ont_retained_ids(s, iid, minlen):
+    if ont_used_as_supplied(s, iid):
+        return ont_input_ids(s, iid)
+    return f"{ont_dir(s, minlen)}/stats/{iid}.ids.tsv.gz"
+
+
+def all_ont_ul_reads(s, minlen):
+    return [ont_ul_reads(s, i.input_id, minlen) for i in used(s, "ont")]
 
 
 def ont_validated(s, minlen):
@@ -28,26 +65,27 @@ def ont_tools(s):
     return ["seqkit"] + (["samtools"] if any(i.format == "bam" for i in used(s, "ont")) else [])
 
 
-rule ont_raw_stats:
+rule ont_input_stats:
+    """QC of each ONT file as supplied (raw, or acknowledged pre-filtered)."""
     input:
         reads=lambda wc: get_input(wc.sample, "ont", wc.iid).path,
-        inventory=f"{RES}/{{sample}}/inputs/inventory.json",
+        inventory=ancient(f"{RES}/{{sample}}/inputs/inventory.json"),
     output:
-        stats=f"{RES}/{{sample}}/reads/ont/stats/{{iid}}.raw.json",
-        ids=f"{RES}/{{sample}}/reads/ont/stats/{{iid}}.raw_ids.txt.gz",
+        stats=f"{RES}/{{sample}}/reads/ont/stats/{{iid}}.input.json",
+        ids=f"{RES}/{{sample}}/reads/ont/stats/{{iid}}.input_ids.tsv.gz",
     log:
-        prov=f"{RES}/{{sample}}/provenance/ont_raw_stats/{{iid}}.json",
+        prov=f"{RES}/{{sample}}/provenance/ont_input_stats/{{iid}}.json",
     threads: R("read_stats")["threads"]
     resources:
         mem_mb=R("read_stats")["mem_mb"],
     params:
         cmd=lambda wc, input, output, threads: wrap(
-            "ont_raw_stats",
+            "ont_input_stats",
             f"{ont_stream(wc.sample, wc.iid, threads)} | {tool('seqkit')} fx2tab -n -l -q "
-            f"| {TOOL} readstats --tech ont --has-qual --genome-size {GENOME_SIZE} --ids-out {q(output.ids)} "
+            f"| {TOOL} readstats --tech ont --has-qual --ids-out {q(output.ids)} "
             f"--source {q(input.reads)} --out {q(output.stats)}",
-            wc.sample, prov_path(wc.sample, "ont_raw_stats", wc.iid),
-            tools=ont_tools(wc.sample), inputs=[input.reads], outputs=[output.stats]),
+            wc.sample, prov_path(wc.sample, "ont_input_stats", wc.iid),
+            tools=ont_tools(wc.sample), inputs=[input.reads], outputs=[output.stats, output.ids]),
     shell:
         "{params.cmd}"
 
@@ -56,7 +94,7 @@ rule ont_filter:
     """Keep reads >= minlen bp (method parameter ont.min_read_len)."""
     input:
         reads=lambda wc: get_input(wc.sample, "ont", wc.iid).path,
-        inventory=f"{RES}/{{sample}}/inputs/inventory.json",
+        inventory=ancient(f"{RES}/{{sample}}/inputs/inventory.json"),
     output:
         reads=f"{RES}/{{sample}}/reads/ont/ul{{minlen}}/{{iid}}.fastq.gz",
     log:
@@ -79,7 +117,8 @@ rule ont_filtered_stats:
     input:
         f"{RES}/{{sample}}/reads/ont/ul{{minlen}}/{{iid}}.fastq.gz",
     output:
-        f"{RES}/{{sample}}/reads/ont/ul{{minlen}}/stats/{{iid}}.json",
+        stats=f"{RES}/{{sample}}/reads/ont/ul{{minlen}}/stats/{{iid}}.json",
+        ids=f"{RES}/{{sample}}/reads/ont/ul{{minlen}}/stats/{{iid}}.ids.tsv.gz",
     threads: R("read_stats")["threads"]
     resources:
         mem_mb=R("read_stats")["mem_mb"],
@@ -87,61 +126,38 @@ rule ont_filtered_stats:
         seqkit=tool("seqkit"),
     shell:
         "{params.seqkit} fx2tab -n -l -q -j {threads} {input:q} | {TOOL} readstats "
-        "--tech ont --has-qual --genome-size {GENOME_SIZE} --source {input:q} --out {output:q}"
+        "--tech ont --has-qual --ids-out {output.ids:q} --source {input:q} --out {output.stats:q}"
 
 
-rule ont_merge:
-    """Concatenate filtered ONT inputs (gzip members) into the single --ul file."""
-    input:
-        lambda wc: [f"{ont_dir(wc.sample, wc.minlen)}/{i.input_id}.fastq.gz"
-                    for i in used(wc.sample, "ont")],
-    output:
-        reads=f"{RES}/{{sample}}/reads/ont/ul{{minlen}}/{{sample}}.ont_ul{{minlen}}.fastq.gz",
-    log:
-        prov=f"{RES}/{{sample}}/provenance/ont_merge/ul{{minlen}}.json",
-    params:
-        cmd=lambda wc, input, output: wrap(
-            "ont_merge", f"cat {' '.join(q(p) for p in input)} > {q(output.reads)}",
-            wc.sample, prov_path(wc.sample, "ont_merge", f"ul{wc.minlen}"),
-            inputs=list(input), outputs=[output.reads]),
-    shell:
-        "{params.cmd}"
-
-
-use rule ont_filtered_stats as ont_merged_stats with:
-    input:
-        f"{RES}/{{sample}}/reads/ont/ul{{minlen}}/{{sample}}.ont_ul{{minlen}}.fastq.gz",
-    output:
-        f"{RES}/{{sample}}/reads/ont/ul{{minlen}}/stats/merged.json",
+def _pairs(s, fn):
+    return " ".join(q(f"{i.input_id}={fn(i.input_id)}") for i in used(s, "ont"))
 
 
 rule validate_ont_reads:
     """Gate: every ONT input usable, yields reported, no duplicated reads."""
     input:
-        raw=lambda wc: [f"{RES}/{wc.sample}/reads/ont/stats/{i.input_id}.raw.json"
+        sup=lambda wc: [ont_input_stats(wc.sample, i.input_id) for i in used(wc.sample, "ont")],
+        sup_ids=lambda wc: [ont_input_ids(wc.sample, i.input_id) for i in used(wc.sample, "ont")],
+        ret=lambda wc: [ont_retained_stats(wc.sample, i.input_id, wc.minlen)
                         for i in used(wc.sample, "ont")],
-        ids=lambda wc: [f"{RES}/{wc.sample}/reads/ont/stats/{i.input_id}.raw_ids.txt.gz"
-                        for i in used(wc.sample, "ont")],
-        filt=lambda wc: [f"{ont_dir(wc.sample, wc.minlen)}/stats/{i.input_id}.json"
-                         for i in used(wc.sample, "ont")],
-        merged=f"{RES}/{{sample}}/reads/ont/ul{{minlen}}/stats/merged.json",
+        ret_ids=lambda wc: [ont_retained_ids(wc.sample, i.input_id, wc.minlen)
+                            for i in used(wc.sample, "ont")],
         md5=lambda wc: [checksum_path(wc.sample, "ont", i.input_id) for i in used(wc.sample, "ont")],
-        inventory=f"{RES}/{{sample}}/inputs/inventory.json",
+        inventory=ancient(f"{RES}/{{sample}}/inputs/inventory.json"),
+        stamp=STAMP,
     output:
         f"{RES}/{{sample}}/reads/ont/ul{{minlen}}/ont_reads.validated.json",
     params:
-        raw=lambda wc: " ".join(q(f"{i.input_id}={RES}/{wc.sample}/reads/ont/stats/{i.input_id}.raw.json")
-                                for i in used(wc.sample, "ont")),
-        ids=lambda wc: " ".join(q(f"{i.input_id}={RES}/{wc.sample}/reads/ont/stats/{i.input_id}.raw_ids.txt.gz")
-                                for i in used(wc.sample, "ont")),
-        filt=lambda wc: " ".join(q(f"{i.input_id}={ont_dir(wc.sample, wc.minlen)}/stats/{i.input_id}.json")
-                                 for i in used(wc.sample, "ont")),
+        sup=lambda wc: _pairs(wc.sample, lambda i: ont_input_stats(wc.sample, i)),
+        sup_ids=lambda wc: _pairs(wc.sample, lambda i: ont_input_ids(wc.sample, i)),
+        ret=lambda wc: _pairs(wc.sample, lambda i: ont_retained_stats(wc.sample, i, wc.minlen)),
+        ret_ids=lambda wc: _pairs(wc.sample, lambda i: ont_retained_ids(wc.sample, i, wc.minlen)),
         min_retained=lambda wc: min_retained_for(wc.minlen),
     shell:
-        "{TOOL} validate-ont --raw {params.raw} --filtered {params.filt} --ids {params.ids} "
-        "--merged {input.merged:q} --min-len {wildcards.minlen} "
-        "--min-retained {params.min_retained} --inventory {input.inventory:q} "
-        "--genome-size {GENOME_SIZE} --out {output:q}"
+        "{TOOL} validate-ont --input-stats {params.sup} --retained-stats {params.ret} "
+        "--input-ids {params.sup_ids} --retained-ids {params.ret_ids} "
+        "--min-len {wildcards.minlen} --min-retained {params.min_retained} "
+        "--inventory {input.inventory:q} --genome-size {GENOME_SIZE} --out {output:q}"
 
 
 def min_retained_for(minlen):

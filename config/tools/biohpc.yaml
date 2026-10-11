@@ -15,23 +15,29 @@ tools:
   samtools:
     cmd: /programs/samtools-1.20/bin/samtools
     version_cmd: /programs/samtools-1.20/bin/samtools --version | head -1
-  # pbtk (bam2fastq) is not installed as a BioHPC module. Pull the
-  # biocontainers image once (see README "One-time setup") and set the path.
+  # pbtk 3.5.0 is not a BioHPC module; container pulled by digest (README):
+  # quay.io/biocontainers/pbtk@sha256:ab2d8dcf1a80e2d7595ab8799c37037766db6fb35d6744440b4643f27749e0ab
   bam2fastq:
-    cmd: apptainer exec --bind /workdir,/local/workdir {containers}/pbtk.sif bam2fastq
-    version_cmd: apptainer exec {containers}/pbtk.sif bam2fastq --version
+    cmd: apptainer exec --bind /workdir,/local/workdir {containers}/pbtk-3.5.0.sif bam2fastq
+    version_cmd: apptainer exec {containers}/pbtk-3.5.0.sif bam2fastq --version | head -1
+  pbindex:
+    cmd: apptainer exec --bind /workdir,/local/workdir {containers}/pbtk-3.5.0.sif pbindex
+    version_cmd: apptainer exec {containers}/pbtk-3.5.0.sif pbindex --version | head -1
   meryl:
     cmd: apptainer exec --bind /workdir,/local/workdir /programs/merqury-1.3/merqury.sif meryl
-    version_cmd: apptainer exec /programs/merqury-1.3/merqury.sif meryl --version
+    version_cmd: apptainer exec /programs/merqury-1.3/merqury.sif meryl --version | head -1
+  # merqury.sh needs MERQURY set inside the container. Its internal meryl
+  # calls take no thread option; the workflow sets OMP_NUM_THREADS (verified).
   merqury:
-    cmd: apptainer exec --bind /workdir,/local/workdir /programs/merqury-1.3/merqury.sif merqury.sh
+    cmd: apptainer exec --bind /workdir,/local/workdir --env MERQURY=/opt/conda/share/merqury /programs/merqury-1.3/merqury.sif merqury.sh
     version_cmd: echo merqury-1.3 container /programs/merqury-1.3/merqury.sif
   busco:
     cmd: apptainer exec --bind /workdir,/local/workdir /programs/busco-6.1.0/busco.sif busco
-    version_cmd: apptainer exec /programs/busco-6.1.0/busco.sif busco --version
+    version_cmd: apptainer exec /programs/busco-6.1.0/busco.sif busco --version | head -1
   md5sum:
     cmd: md5sum
     version_cmd: md5sum --version | head -1
 
-# Substituted into {containers} above; override in config/local/local.yaml.
-containers_dir: /workdir/naj49/containers
+# Substituted into {containers} above (relative to pipeline/); override in
+# config/local/local.yaml if containers live elsewhere.
+containers_dir: ../containers

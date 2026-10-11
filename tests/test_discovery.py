@@ -193,9 +193,10 @@ class DiscoveryTest(unittest.TestCase):
         self.assertIn("UNEXPECTED_ENTRY", codes(issues))
 
     def test_cross_sample_duplicate(self):
-        for s in ("S1", "S2"):
-            d = mkdirs(self.tmp, s)
-            write_fastq(f"{d['hifi']}/a.fastq.gz", hifi_names(M1, 5), [12000] * 5, seed=7)
+        # Copy (not regenerate): gzip headers embed a timestamp.
+        d1, d2 = mkdirs(self.tmp, "S1"), mkdirs(self.tmp, "S2")
+        write_fastq(f"{d1['hifi']}/a.fastq.gz", hifi_names(M1, 5), [12000] * 5, seed=7)
+        shutil.copy(f"{d1['hifi']}/a.fastq.gz", f"{d2['hifi']}/a.fastq.gz")
         _, _, issues = self.run_discover()
         self.assertIn("CROSS_SAMPLE_DUPLICATE", codes(issues))
 

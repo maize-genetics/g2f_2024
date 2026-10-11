@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Test stub for pbtk pbindex [-j N] in.bam -> in.bam.pbi
+set -euo pipefail
+if [[ "${1:-}" == "--version" ]]; then echo "pbindex stub"; exit 0; fi
+for a in "$@"; do last=$a; done
+echo stub > "$last.pbi"

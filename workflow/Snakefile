@@ -3,6 +3,7 @@
 # Run from the pipeline/ directory:
 #   snakemake --profile profiles/biohpc --dry-run --printshellcmds
 #   snakemake --profile profiles/biohpc --cores 64
+#   snakemake --profile profiles/biohpc --cores 32 imported_qc   # historical assemblies
 #
 # Stages: input discovery -> HiFi/ONT read preprocessing and QC -> k-mer
 # screen -> hifiasm (method chosen automatically) -> GFA-to-FASTA with
@@ -28,6 +29,7 @@ include: "rules/hifi.smk"
 include: "rules/ont.smk"
 include: "rules/kmer.smk"
 include: "rules/assembly.smk"
+include: "rules/imported.smk"
 include: "rules/qc.smk"
 include: "rules/summary.smk"
 
@@ -36,6 +38,13 @@ rule all:
     input:
         [validated_marker(s, METHOD[s]) for s in SAMPLES],
         PROJECT_SUMMARY if SAMPLES else [],
+
+
+rule imported_qc:
+    """QC of registered read-only historical assemblies (config/external_assemblies.yaml)."""
+    input:
+        imported_targets(),
+        IMPORTED_SUMMARY if imported_targets() else [],
 
 
 rule reads_qc:

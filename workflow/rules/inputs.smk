@@ -1,6 +1,21 @@
-# Input inventory and strong (full-file) checksums of every used read file.
+# Input inventory, validation-identity stamp, and full-file checksums.
+#
+# Checksums and read statistics are computed once and reused: they depend
+# only on the (unchanged) input files, never on the validation identity.
 
-localrules: inventory
+localrules: inventory, identity_stamp
+
+
+rule identity_stamp:
+    """Record what the current validation identity consists of (auditable)."""
+    output:
+        STAMP,
+    run:
+        os.makedirs(os.path.dirname(output[0]), exist_ok=True)
+        with open(output[0], "w") as fh:
+            json.dump({"validation_id": VID, "components": VID_PARTS,
+                       "science_version": SCI["science_version"]}, fh, indent=2)
+            fh.write("\n")
 
 
 rule inventory:
@@ -11,6 +26,7 @@ rule inventory:
         rec = dict(INV[wildcards.sample])
         rec["science_version"] = SCI["science_version"]
         rec["method_file"] = os.path.relpath(method(rec["selected_method"])["_file"], PIPELINE_DIR)
+        rec["method_fingerprint"] = METHOD_FP[rec["selected_method"]]
         os.makedirs(os.path.dirname(output[0]), exist_ok=True)
         with open(output[0], "w") as fh:
             json.dump(rec, fh, indent=2)
@@ -26,10 +42,10 @@ def all_checksums(s):
 
 
 rule checksum:
-    """Full-file MD5 of an original input (read-only); recorded for provenance/SRA."""
+    """Full-file MD5 of an original input (read-only); computed once, recorded for provenance/SRA."""
     input:
         reads=lambda wc: get_input(wc.sample, wc.tech, wc.iid).path,
-        inventory=f"{RES}/{{sample}}/inputs/inventory.json",
+        inventory=ancient(f"{RES}/{{sample}}/inputs/inventory.json"),
     output:
         f"{RES}/{{sample}}/inputs/md5/{{tech}}/{{iid}}.md5",
     log:

@@ -26,6 +26,9 @@ methods_dir: config/methods
 resources: config/resources/default.yaml
 tools: config/tools/biohpc.yaml
 
+# Read-only historical assemblies registered for QC benchmarking.
+external_assemblies: config/external_assemblies.yaml
+
 # Optional, untracked machine-specific settings: external read-only input
 # references and local paths (e.g. BUSCO lineage directory). See
 # config/local/README.md.

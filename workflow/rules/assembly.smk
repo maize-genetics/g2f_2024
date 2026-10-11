@@ -1,7 +1,12 @@
 # hifiasm assembly (method selected per sample) and GFA -> FASTA conversion.
 #
-# Assembly outputs are write-protected after success. Snakemake will refuse
-# to overwrite them; a human must move them aside deliberately.
+# Assembly outputs are write-protected after success; Snakemake refuses to
+# overwrite them. A snapshot of the method definition (with its fingerprint)
+# is written next to the assembly; the workflow refuses to continue if the
+# method file is later edited in place.
+#
+# Validation gates are declared ancient(): re-validation under new code or
+# science settings never re-triggers an expensive assembly.
 
 
 def asm_dir(s, m):
@@ -24,17 +29,19 @@ def hifiasm_inputs(wc):
     s, m = wc.sample, wc.method
     d = {
         "hifi": all_hifi_reads(s),
-        "hifi_ok": hifi_validated(s),
-        "kmer_gate": kmer_gate_path(s),
-        "md5": all_checksums(s),
-        "inventory": inventory_path(s),
+        "hifi_ok": ancient(hifi_validated(s)),
+        "md5": [ancient(p) for p in all_checksums(s)],
+        "inventory": ancient(inventory_path(s)),
+        "method_file": ancient(method(m)["_file"]),
     }
+    if KMER_BLOCKING:
+        d["kmer_gate"] = ancient(kmer_gate_path(s))
     if uses_ont(m):
         if not used(s, "ont"):
             raise WorkflowError(f"method {m} needs ONT reads, but sample {s} has no usable ONT inputs")
         L = method(m)["ont"]["min_read_len"]
-        d["ont"] = ont_merged(s, L)
-        d["ont_ok"] = ont_validated(s, L)
+        d["ont"] = all_ont_ul_reads(s, L)
+        d["ont_ok"] = ancient(ont_validated(s, L))
     return d
 
 
@@ -51,21 +58,23 @@ def hifiasm_cmd(wc, input, threads):
     meth = method(m)
     argv = [tool("hifiasm"), "-o", f"{s}.asm", "-t", str(threads)] + [str(a) for a in meth["args"]]
     if uses_ont(m):
-        argv += ["--ul", q(input.ont)]
+        argv += ["--ul", q(",".join(input.ont))]
     argv += [q(p) for p in input.hifi]
     run = " ".join(argv)
     d = asm_dir(s, m)
+    snap = (f"{TOOL} method-snapshot --method-file {q(meth['_file'])} "
+            f"--science-version {SCI['science_version']} --out {q(method_record_path(s, m))}")
     return wrap(
         "hifiasm",
         f"cd {q(d)} && "
         f"if ls {s}.asm.*.bin >/dev/null 2>&1; then echo 'Refusing to start: intermediate "
         f"hifiasm .bin files from an earlier attempt exist in {d}. Inspect them and move them "
         f"aside before re-running (hifiasm would silently reuse them).' >&2; exit 2; fi && "
-        f"{run} > {s}.asm.stdout.log 2> {s}.asm.stderr.log",
+        f"{snap} && {run} > {s}.asm.stdout.log 2> {s}.asm.stderr.log",
         s, prov_path(s, "hifiasm", m), tools=["hifiasm"], method_id=m,
         expect={"hifiasm": meth["expected_version"]},
-        inputs=list(input.hifi) + ([input.ont] if uses_ont(m) else []),
-        outputs=[asm_gfa(s, m, "p_ctg"), asm_gfa(s, m, "a_ctg")])
+        inputs=list(input.hifi) + (list(input.ont) if uses_ont(m) else []),
+        outputs=[asm_gfa(s, m, "p_ctg"), asm_gfa(s, m, "a_ctg"), method_record_path(s, m)])
 
 
 rule hifiasm:
@@ -74,6 +83,7 @@ rule hifiasm:
     output:
         p=protected(f"{RES}/{{sample}}/assembly/{{method}}/{{sample}}.asm.bp.p_ctg.gfa"),
         a=protected(f"{RES}/{{sample}}/assembly/{{method}}/{{sample}}.asm.bp.a_ctg.gfa"),
+        method=protected(f"{RES}/{{sample}}/assembly/{{method}}/{{sample}}.{{method}}.method.json"),
     log:
         prov=f"{RES}/{{sample}}/provenance/hifiasm/{{method}}.json",
         stderr=f"{RES}/{{sample}}/assembly/{{method}}/{{sample}}.asm.stderr.log",
@@ -104,16 +114,3 @@ rule gfa_to_fasta:
             method_id=wc.method, inputs=[input[0]], outputs=[output[0]]),
     shell:
         "{params.cmd}"
-
-
-rule check_gfa_fasta:
-    """Same names, order, lengths and sequence hashes in GFA and FASTA; ACGTN only."""
-    input:
-        gfa=f"{RES}/{{sample}}/assembly/{{method}}/{{sample}}.asm.bp.{{ctg}}.gfa",
-        fa=f"{RES}/{{sample}}/assembly/{{method}}/{{sample}}.{{method}}.{{ctg}}.fa",
-    output:
-        f"{RES}/{{sample}}/assembly/{{method}}/{{sample}}.{{method}}.{{ctg}}.gfa_check.json",
-    resources:
-        mem_mb=R("validate_fasta")["mem_mb"],
-    shell:
-        "{TOOL} check-gfa --gfa {input.gfa:q} --fasta {input.fa:q} --out {output:q}"

@@ -479,6 +479,12 @@ def discover(cfg):
                                 "sample directory names may contain only letters, digits, "
                                 "'.', '_' and '-'", "Rename the directory."))
             continue
+        if "," in path or any(c.isspace() for c in path):
+            issues.append(Issue("error", "BAD_PATH", sample,
+                                "read file paths may not contain commas or whitespace (hifiasm "
+                                "takes comma-separated --ul lists)", "Rename the file or directory.",
+                                [path]))
+            continue
         real = os.path.realpath(path)
         if real in seen_paths:
             issues.append(Issue("error", "SAME_FILE_TWICE", sample,
@@ -631,6 +637,12 @@ def stable_view(record):
     """Fields that define input identity; used to detect changed inputs."""
     return {
         "selected_method": record["selected_method"],
-        "inputs": [(i["tech"], i["path"], i["status"], i["size"], i["fingerprint"], i["input_id"])
+        "inputs": [[i["tech"], i["path"], i["status"], i["size"], i["fingerprint"], i["input_id"],
+                    sorted(n for n in i.get("notes", []) if n.startswith(("ack:", "excluded:")))]
                    for i in record["inputs"]],
     }
+
+
+def is_prefiltered(inp):
+    notes = inp.notes if hasattr(inp, "notes") else inp.get("notes", [])
+    return "ack:prefiltered_ont" in notes

@@ -6,10 +6,20 @@ IDs). Names may contain tabs (dorado FASTQ tags), so columns are parsed from
 the right.
 """
 import gzip
+import hashlib
+import os
 import re
 from array import array
 
 from .discovery import PACBIO_NAME_RE
+
+
+def aggregator_id():
+    """Identity of the read-statistics code; recorded in every stats file so
+    validation can refuse statistics produced by different code."""
+    with open(os.path.abspath(__file__), "rb") as fh:
+        code = fh.read()
+    return hashlib.sha256(code + PACBIO_NAME_RE.pattern.encode()).hexdigest()[:12]
 
 LEN_BIN_EDGES_KB = [0, 1, 2, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200, 300, 500, 1000]
 QUAL_BIN_EDGES = [0, 5, 7, 10, 12, 15, 20, 25, 30, 40]
@@ -85,7 +95,7 @@ def aggregate(lines, tech, has_qual, genome_size=None, ids_out=None):
                 dup_ids += 1
             seen_ids.add(key)
             if idfh:
-                idfh.write(rid + "\n")
+                idfh.write(f"{rid}\t{length}\n")
     if idfh:
         idfh.close()
     srt = sorted(lengths, reverse=True)
@@ -93,6 +103,7 @@ def aggregate(lines, tech, has_qual, genome_size=None, ids_out=None):
     rn50, rl50 = n50(srt, total)
     out = {
         "tech": tech,
+        "aggregator_id": aggregator_id(),
         "n_reads": len(srt),
         "total_bases": total,
         "min_len": srt[-1] if srt else 0,

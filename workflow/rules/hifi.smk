@@ -24,10 +24,27 @@ def hifi_validated(s):
     return f"{RES}/{s}/reads/hifi/hifi_reads.validated.json"
 
 
+def bam2fastq_cmd(wc, input, output, threads):
+    """pbtk needs a .pbi index next to the BAM. To keep data/ untouched, work on
+    a symlink in results/: reuse an existing .pbi, otherwise build one there.
+    bam2fastq can exit 0 with an empty FASTQ when the index is unusable, so
+    validate_hifi_reads compares read counts with the BAM record count."""
+    bam = input.bam
+    work = output[0][:-len(".fastq.gz")] + ".pbtk"
+    link = f"{work}/in.bam"
+    index = (f"ln -sfn {q(bam + '.pbi')} {q(link + '.pbi')}" if os.path.exists(bam + ".pbi")
+             else f"{tool('pbindex')} -j {threads} {q(link)}")
+    cmd = (f"mkdir -p {q(work)} && ln -sfn {q(bam)} {q(link)} && {index} && "
+           f"{tool('bam2fastq')} -j {threads} -o {q(output[0][:-len('.fastq.gz')])} {q(link)}")
+    return wrap("hifi_bam_to_fastq", cmd, wc.sample,
+                prov_path(wc.sample, "hifi_bam_to_fastq", wc.iid),
+                tools=["bam2fastq", "pbindex"], inputs=[bam], outputs=[output[0]])
+
+
 rule hifi_bam_to_fastq:
     input:
         bam=lambda wc: get_input(wc.sample, "hifi", wc.iid).path,
-        inventory=f"{RES}/{{sample}}/inputs/inventory.json",
+        inventory=ancient(f"{RES}/{{sample}}/inputs/inventory.json"),
     output:
         f"{RES}/{{sample}}/reads/hifi/converted/{{iid}}.fastq.gz",
     log:
@@ -36,11 +53,7 @@ rule hifi_bam_to_fastq:
     resources:
         mem_mb=R("hifi_bam_to_fastq")["mem_mb"],
     params:
-        cmd=lambda wc, input, output: wrap(
-            "hifi_bam_to_fastq",
-            f"{tool('bam2fastq')} -o {q(output[0][:-len('.fastq.gz')])} {q(input.bam)}",
-            wc.sample, prov_path(wc.sample, "hifi_bam_to_fastq", wc.iid),
-            tools=["bam2fastq"], inputs=[input.bam], outputs=[output[0]]),
+        cmd=bam2fastq_cmd,
     shell:
         "{params.cmd}"
 
@@ -70,7 +83,7 @@ rule hifi_read_stats:
     """One streaming pass: yield, length/quality distributions, movie census."""
     input:
         reads=lambda wc: hifi_reads(wc.sample, wc.iid),
-        inventory=f"{RES}/{{sample}}/inputs/inventory.json",
+        inventory=ancient(f"{RES}/{{sample}}/inputs/inventory.json"),
     output:
         f"{RES}/{{sample}}/reads/hifi/stats/{{iid}}.json",
     log:
@@ -84,7 +97,7 @@ rule hifi_read_stats:
             f"{tool('seqkit')} fx2tab -n -l {'-q ' if hifi_has_qual(wc.sample, wc.iid) else ''}"
             f"-j {threads} {q(input.reads)} | {TOOL} readstats --tech hifi "
             f"{'--has-qual ' if hifi_has_qual(wc.sample, wc.iid) else ''}"
-            f"--genome-size {GENOME_SIZE} --source {q(input.reads)} --out {q(output[0])}",
+            f"--source {q(input.reads)} --out {q(output[0])}",
             wc.sample, prov_path(wc.sample, "hifi_read_stats", wc.iid),
             tools=["seqkit"], inputs=[input.reads], outputs=[output[0]]),
     shell:
@@ -99,7 +112,8 @@ rule validate_hifi_reads:
         counts=lambda wc: [f"{RES}/{wc.sample}/reads/hifi/converted/{i.input_id}.bam_primary_records.txt"
                            for i in used(wc.sample, "hifi") if i.format == "bam"],
         md5=lambda wc: [checksum_path(wc.sample, "hifi", i.input_id) for i in used(wc.sample, "hifi")],
-        inventory=f"{RES}/{{sample}}/inputs/inventory.json",
+        inventory=ancient(f"{RES}/{{sample}}/inputs/inventory.json"),
+        stamp=STAMP,
     output:
         f"{RES}/{{sample}}/reads/hifi/hifi_reads.validated.json",
     params:

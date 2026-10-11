@@ -1,7 +1,7 @@
 # Scientific decisions
 
 The scientific configuration lives in `config/science.yaml` and
-`config/methods/`. Its current version is `science_version: 1`.
+`config/methods/`. Its current version is `science_version: 2`.
 
 Every change to that configuration must be recorded here and must bump
 `science_version`. A method file must not be edited after it has been used
@@ -46,6 +46,31 @@ for a production assembly; create a new `method_id` instead.
   are reported for every input and for each sample.
 * **No minimum coverage.** No minimum ONT coverage threshold is imposed;
   adding one needs a documented justification.
+* **Standard for future datasets:** ≥ 50,000 bp, defined by the method's
+  `ont.min_read_len`.
+* **Pre-filtered inputs (added 2026-10-11, science v2).** An acknowledged
+  pre-filtered ONT FASTQ is used as supplied. It is not re-filtered or
+  copied. The workflow first checks across the whole file that every read
+  is ≥ the method threshold, and fails if any read is shorter. Its yield is
+  reported as `supplied` (`ont_input_type: prefiltered`); raw yield fields
+  stay empty.
+
+## D3a. PHBW8 ONT input: approved pre-filtered dataset (2026-10-11)
+
+* **Decision.** The project lead approved `PHBW8_ONT_gt50kb.fastq.gz` as a
+  derived, already length-filtered ONT input, recorded in `samples.yaml`
+  under `acknowledge`.
+* **Provenance observed** in the first 200 read headers:
+  * run `a6c999f5ed670f6a87f642dcc2be2382abd9c375`;
+  * flow cell `PAQ81223`;
+  * basecall model `dna_r10.4.1_e8.2_400bps_hac@v4.2.0`;
+  * first read started 2024-05-20.
+* **Unknown:** the raw basecalled files, the unfiltered yield, the filtering
+  command, and the length-boundary convention.
+* **Boundary convention.** The historical name suggests "> 50 kb", while
+  current methods use "≥ 50,000 bp". Any read set that is > 50,000 is also
+  ≥ 50,000, so the difference doesn't justify reprocessing or discarding the
+  dataset. The distinction is recorded.
 
 ## D4. Duplicate and derived inputs (2026-10-11)
 
@@ -71,31 +96,61 @@ for a production assembly; create a new `method_id` instead.
   any tool.
 * **Basis:** the PHBW8 assembly sizes (2.27–2.32 Gb).
 
-## D6. Read k-mer screen (2026-10-11)
+## D6. Read k-mer screen: diagnostic, not blocking (2026-10-11, science v2)
 
-* **What:** meryl k = 21 on the HiFi reads. The same database is reused by
-  Merqury.
-* **Heuristic:** a sample is flagged if the histogram has a local maximum,
-  or a height above 25% of the main peak, within 0.35–0.65× of the main peak
-  coverage.
-* **Effect:** a flagged sample does not assemble until `samples.yaml`
-  records a `kmer_review`.
-* **Status:** a screening heuristic for routing samples to review, not an
-  estimate of heterozygosity. It has not been calibrated on real data yet;
-  calibrate it on PHBW8.
+* **What it does:** meryl k = 21 on the HiFi reads (the same database Merqury
+  uses). The spectrum is smoothed with a moving average over about 10% of
+  the main-peak coverage. A sample is **flagged** if either:
+  * the smoothed height within 0.35–0.65× of the main peak exceeds 25% of
+    the main-peak height; or
+  * a smoothed local maximum reaching ≥ 5% of the main peak lies in that
+    window.
+* **Interpretation (idealised).** Assume Poisson coverage, a diploid genome
+  and per-base heterozygosity h ≪ 1/k.
+  * Heterozygous k-mers number about 2·k·h·G.
+  * Their peak sits at half coverage and is √2 narrower.
+  * The height ratio is therefore about 2√2·k·h, i.e. about 59·h for k = 21.
+  * A ratio of 0.25 corresponds to h ≈ 0.4%. Each screen reports this
+    "idealised heterozygosity equivalent".
+  * Real HiFi spectra are over-dispersed, and maize repeats and duplications
+    add mass at other multiplicities. **The thresholds are not calibrated**,
+    and lower residual heterozygosity (< 0.4%) would generally not be
+    flagged by the ratio rule.
+* **Evidence for treating it as diagnostic only:**
+  * The unsmoothed v1 screen flagged a perfectly homozygous synthetic
+    dataset because of sampling noise.
+  * hifiasm printed `peak_het: 26` for the same data.
+* **Policy.**
+  * A flag is a recorded warning (`kmer_assessment: flagged_unreviewed`). It
+    does not block assembly (`block_assembly_on_flag: false`).
+  * An explicit, auditable review can be recorded in `samples.yaml`
+    (`kmer_review`: status, reason, reviewer, date); the sample then shows
+    `flagged_reviewed`.
+  * Blocking can be turned back on in `science.yaml`.
+  * An invalid or uncomputable spectrum is always a hard failure.
+* **Not used as evidence:** the PHBW8 37× vs 72× discrepancy in hifiasm's
+  logs.
+* **Calibration plan:** use the PHBW8 spectrum and further lines, plus a
+  model-based tool (e.g. GenomeScope 2, not installed) if needed.
 
 ## D7. Assembly QC standards (2026-10-11)
 
 * **Contiguity and content:** seqkit size, contig count, N50, L50, GC and gap
   bases for both p_ctg and a_ctg.
-* **Primary BUSCO lineage:** `poales_odb12` (OrthoDB 12.1, created
-  2026-05-22, 6,282 markers), run with miniprot.
-  * Available offline in `~/busco_downloads`.
-  * BUSCO's lineage list also has `poales_odb12.2` (dated 2026-05-13). Which
-    of the two is current needs checking before production.
-  * The historical `liliopsida_odb10` results are kept for comparison only.
-    Results from different lineages or OrthoDB versions are not
-    interchangeable.
+* **Primary BUSCO lineage: `poales_odb12.2`** (decided 2026-10-11, science
+  v2), run with BUSCO 6.1.0 and miniprot.
+  * **Pinned identity:** `datasets_version: odb12.2` (from the BUSCO JSON,
+    which BUSCO derives from the `dataset.cfg` name), `dataset.cfg`
+    `creation_date: 2026-05-13`, and the BUSCO version 6.1.0.
+  * **Enforcement:** every BUSCO validation checks these; a mismatch fails.
+  * **Still open:** `number_of_BUSCOs` is to be pinned after download. The
+    archive MD5 from BUSCO's `file_versions.tsv` is
+    `c2cf3a2db7a23f9b8c0d3d9af54c5132`.
+  * **Not installed yet.** The installed `poales_odb12` (OrthoDB 12.1,
+    created 2026-05-22) runs as `odb12` and is not this dataset.
+  * **Other lineages:** the historical `liliopsida_odb10` results are kept
+    and labelled separately and are not re-run. Results from different
+    lineages or releases are not interchangeable.
 * **Merqury:** QV and k-mer completeness.
 * **Small contigs:** contigs ≤ 1 Mb are listed for organelle and
   contamination follow-up. No screening tool is integrated yet; FCS-GX is
@@ -103,11 +158,64 @@ for a production assembly; create a new `method_id` instead.
 * **Selection principle:** no single metric (N50, BUSCO C) decides between
   assemblies.
 
+## D8. Result identity and rerun policy (2026-10-11)
+
+Snakemake runs with `--rerun-triggers mtime`, so editing code or parameters
+never silently re-runs expensive jobs. To keep that from leaving outdated
+results labelled as valid, the workflow does the following.
+
+* **Methods are immutable.**
+  * Each assembly writes `<LINE>.<method_id>.method.json`, which holds the
+    method definition and its fingerprint.
+  * If a used method file is edited, the workflow refuses to run.
+  * Changed parameters need a new `method_id`, which writes a new results
+    directory.
+  * The required tool version is part of the method and is checked when the
+    job runs.
+* **Validation identity (`VID`).** This is a hash of `science.yaml`, every
+  method definition, and the validation and summary code.
+  * Cheap validation jobs depend on a stamp file named with the VID.
+  * Markers and summary tables carry the VID in their file names, so a
+    change re-runs only cheap jobs and writes summaries under a new name.
+  * Old summaries keep their old names and are never presented as current.
+  * Heavy jobs depend on validation results only through `ancient()`, so
+    re-validation never re-runs assembly, k-mer counting, BUSCO or Merqury.
+* **Sample decision identity (`SID`).** This is a hash of a sample's
+  `samples.yaml` entry and is part of its summary names. Editing a review or
+  a note refreshes that sample's summary only.
+* **Read-statistics code identity.** Every statistics file records the
+  identity of the code that produced it. Validation refuses statistics made
+  by different code instead of silently re-scanning large files.
+* **Inputs.** If a sample's inputs or acknowledgements change after results
+  exist, the workflow refuses to run.
+* **Unaffected.** Resource and tool-path settings are part of none of these
+  identities.
+* **Failed runs.**
+  * Snakemake removes the outputs of a failed job.
+  * The provenance record (with `status: failed`) is kept.
+  * hifiasm refuses to start while `.bin` files from a failed attempt exist.
+* **Reused, not recomputed:** checksums and full-file statistics.
+
+## D9. Historical assemblies as read-only QC benchmarks (2026-10-11)
+
+* **Registration.** The PHBW8 legacy runs are registered in
+  `config/external_assemblies.yaml` and are QC'd as
+  `method_id: imported-<id>`, with `assembly_source: imported_legacy`.
+* **Separation.** Their results go into a separate table and never into the
+  pipeline's assembly table.
+* **Protection.**
+  * Files are linked into `results/`, never written in place.
+  * Their size, mtime and fingerprint are recorded at import.
+  * If a registered file later changes, the workflow refuses to run.
+* **Scope.** Initially only the HiFi + ONT `-l0` run has `stats` and `busco`
+  enabled. Merqury needs the full read k-mer database and is enabled
+  separately once authorised.
+
 ## Open questions for review
 
 * What does hifiasm's coverage-estimate discrepancy for PHBW8 mean (audit,
   section 2)?
 * Why do 127 complete BUSCOs contain internal stop codons?
-* Use `poales_odb12` or `poales_odb12.2`?
 * How should the k-mer screen thresholds be calibrated once PHBW8 has a real
   histogram?
+* What is `number_of_BUSCOs` for `poales_odb12.2`? Pin it after download.

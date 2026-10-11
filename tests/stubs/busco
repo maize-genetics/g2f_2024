@@ -15,5 +15,7 @@ here = os.path.dirname(os.path.abspath(__file__))
 d = json.load(open(os.path.join(here, "..", "fixtures",
                                 "busco_short_summary_PHBW8_l0_liliopsida_odb10.json")))
 d["lineage_dataset"]["name"] = lin
+# Real BUSCO 6.1.0 takes datasets_version from the dataset.cfg name suffix.
+d["parameters"]["datasets_version"] = "odb" + lin.split("_odb")[-1]
 os.makedirs(os.path.join(out_path, name), exist_ok=True)
 json.dump(d, open(os.path.join(out_path, name, f"short_summary.specific.{lin}.{name}.json"), "w"))

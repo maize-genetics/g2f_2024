@@ -6,7 +6,8 @@ import shlex
 from snakemake.exceptions import WorkflowError
 
 from g2f import discovery
-from g2f.config import ConfigError, load_config, rule_resources
+from g2f.config import (ConfigError, load_config, method_fingerprint, rule_resources,
+                        validation_identity)
 
 try:
     CFG = load_config(config, PIPELINE_DIR)
@@ -56,13 +57,84 @@ for _s in SAMPLES:
                 f"--only {_s}`. If the change is intended, move results/{_s}/ aside so the sample "
                 "is processed from scratch; the workflow will not mix input sets.")
 
+# ---------------------------------------------------------------- identity
+# Validation identity: science.yaml content + all method definitions + the
+# code that validates and summarizes. A change gives a new identity, which
+# (a) re-runs the cheap validation/summary jobs (they depend on the stamp
+# file below) and (b) writes validated markers and summary tables under new
+# names, so an outdated validation can never be mistaken for a current one.
+# Heavy jobs (conversion, k-mer counting, hifiasm, BUSCO, Merqury) do not
+# depend on it, and resource/tool-path settings are not part of it.
+_SCRIPTS = os.path.join(PIPELINE_DIR, "scripts")
+VALIDATION_CODE = [os.path.join(_SCRIPTS, "g2f", f) for f in
+                   ("validate.py", "gfa.py", "kmer.py", "summary.py")] + \
+                  [os.path.join(_SCRIPTS, "g2f_tool.py")]
+VID, VID_PARTS = validation_identity(CFG, VALIDATION_CODE)
+STAMP = f"{RES}/.identity/validation-{VID}.json"
+METHOD_FP = {m: method_fingerprint(d) for m, d in CFG["methods"].items()}
+
+
+def method_record_path(s, m):
+    return f"{RES}/{s}/assembly/{m}/{s}.{m}.method.json"
+
+
+# Existing assemblies must have been produced by the current method definition.
+for _s in SAMPLES:
+    for _m in CFG["methods"]:
+        _p = method_record_path(_s, _m)
+        if os.path.exists(_p):
+            with open(_p) as _fh:
+                _fp = json.load(_fh)["fingerprint"]
+            if _fp != METHOD_FP[_m]:
+                raise WorkflowError(
+                    f"The method definition {_m} was changed after it was used for sample {_s} "
+                    f"(recorded fingerprint {_fp}, current {METHOD_FP[_m]}; see {_p}). Method "
+                    "files are immutable: restore the original file, or create a new method_id "
+                    "for the changed parameters.")
+
+# ------------------------------------------------- imported (legacy) assemblies
+_only = set(CFG["only_samples"])
+IMPORTED = {}
+for _s, _entries in CFG["external_assemblies"].items():
+    if _only and _s not in _only:
+        continue
+    for _aid, _rec in _entries.items():
+        IMPORTED[(_s, _rec["akey"])] = _rec
+
+
+def import_record_path(s, aid):
+    return f"{RES}/{s}/imported/{aid}/import.json"
+
+
+for (_s, _akey), _rec in IMPORTED.items():
+    _p = import_record_path(_s, _rec["aid"])
+    if os.path.exists(_p):
+        with open(_p) as _fh:
+            _old = json.load(_fh)
+        for _k, _src in (("gfa", _rec["p_ctg_gfa"]), ("fa", _rec["p_ctg_fa"]),
+                         ("log", _rec["hifiasm_log"])):
+            _f = _old["files"][_k]
+            _ok = (os.path.isfile(_src) and _f["path"] == _src
+                   and os.path.getsize(_src) == _f["size"]
+                   and discovery.fingerprint(_src, _f["size"]) == _f["fingerprint"])
+            if not _ok:
+                raise WorkflowError(
+                    f"Registered historical file for {_s}/{_rec['aid']} changed or moved since "
+                    f"import: {_src}. Historical assemblies must stay unchanged; investigate "
+                    f"before continuing (import record: {_p}).")
+
+AKEYS = list(CFG["methods"]) + sorted({k for _, k in IMPORTED})
+
 wildcard_constraints:
-    sample="|".join(map(re.escape, SAMPLES)) or "(?!)",
+    sample="|".join(map(re.escape, sorted(set(SAMPLES) | {s for s, _ in IMPORTED}))) or "(?!)",
     method="|".join(map(re.escape, CFG["methods"])),
+    akey="|".join(map(re.escape, AKEYS)),
+    aid="|".join(map(re.escape, sorted({r["aid"] for r in IMPORTED.values()}))) or "(?!)",
     iid=r"[A-Za-z0-9_.-]+",
     ctg="p_ctg|a_ctg",
     minlen=r"\d+",
     lineage=r"[A-Za-z0-9_.-]+",
+    reviewid=r"[0-9a-f]+|none",
 
 
 # ---------------------------------------------------------------- helpers

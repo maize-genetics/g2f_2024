@@ -102,43 +102,99 @@ def cmd_check_gfa(a):
 
 
 def cmd_kmer_screen(a):
-    res = kmer.screen(kmer.read_histogram(a.hist), (a.window_lo, a.window_hi), a.max_ratio)
+    res = kmer.screen(kmer.read_histogram(a.hist), (a.window_lo, a.window_hi), a.max_ratio,
+                      a.min_local_max_ratio, a.smooth_frac, a.k)
     res["histogram"] = a.hist
     _emit(res, a.out, "k-mer screen could not be computed")
 
 
-def cmd_kmer_gate(a):
+def cmd_kmer_assess(a):
+    """Combine the k-mer screen with any recorded human review.
+
+    Default: diagnostic only (a flagged sample gets a recorded warning). With
+    --block, a flagged sample without an accepted review fails, which stops
+    assembly. An invalid/uncomputable screen always fails."""
     import yaml
     with open(a.screen) as fh:
         scr = json.load(fh)
     with open(a.samples) as fh:
         entry = ((yaml.safe_load(fh) or {}).get("samples") or {}).get(a.sample) or {}
-    review = entry.get("kmer_review") or {}
-    res = {"sample": a.sample, "screen": scr, "review": review, "ok": True, "errors": []}
-    if scr.get("flagged") and a.block:
-        if review.get("status") != "accepted" or not review.get("reason"):
-            res["ok"] = False
-            res["errors"] = [
-                f"k-mer screen flagged {a.sample} ({scr.get('flag_reason')}); the -l0 baseline "
-                "may not be appropriate. Inspect " + scr.get("histogram", "the histogram") + " and "
-                "record a decision in config/samples.yaml under kmer_review: {status: accepted, "
-                "reason: ..., reviewer: ..., date: ...} before assembly can proceed."]
-    _emit(res, a.out, "Assembly blocked pending human review")
+    review = entry.get("kmer_review") or None
+    errors, warnings = [], []
+    if not scr.get("ok"):
+        errors.append(f"k-mer screen could not be computed: {scr.get('error')}")
+        status = "invalid"
+    elif not scr.get("flagged"):
+        status = "not_flagged"
+    elif review and review.get("status") == "accepted" and review.get("reason"):
+        status = "flagged_reviewed"
+    else:
+        status = "flagged_unreviewed"
+        msg = (f"k-mer screen flagged {a.sample} ({scr.get('flag_reason')}). The screen is an "
+               "uncalibrated heuristic; inspect " + scr.get("histogram", "the histogram") +
+               " and, if appropriate, record kmer_review: {status: accepted, reason, reviewer, "
+               "date} in config/samples.yaml.")
+        (errors if a.block else warnings).append(msg)
+    res = {"sample": a.sample, "status": status, "blocking": a.block, "screen": scr,
+           "review": review, "review_id": a.review_id, "warnings": warnings,
+           "ok": not errors, "errors": errors}
+    for w in warnings:
+        sys.stderr.write("WARNING: " + w + "\n")
+    _emit(res, a.out, "Assembly blocked pending human review" if a.block else
+          "k-mer assessment failed")
+
+
+def cmd_method_snapshot(a):
+    import yaml
+    from g2f.config import method_fingerprint
+    with open(a.method_file) as fh:
+        m = yaml.safe_load(fh)
+    provenance.write_json(a.out, {"method_id": m["method_id"], "fingerprint": method_fingerprint(m),
+                                  "method": m, "science_version": a.science_version,
+                                  "method_file": a.method_file})
+
+
+def cmd_import_assembly(a):
+    """Record identity of a read-only historical assembly and link it into results."""
+    from g2f.discovery import fingerprint
+    links = dict(zip(("gfa", "fa", "log"), (a.gfa, a.fa, a.log)))
+    targets = dict(zip(("gfa", "fa", "log"), (a.link_gfa, a.link_fa, a.link_log)))
+    rec = {"sample": a.sample, "assembly_id": a.aid, "assembly_source": "imported_legacy",
+           "statement": "Historical assembly registered read-only; NOT produced by this workflow.",
+           "register": a.register, "files": {}}
+    for k, src in links.items():
+        if not os.path.isfile(src):
+            sys.exit(f"registered file not found: {src}")
+        size = os.path.getsize(src)
+        rec["files"][k] = {"path": src, "size": size, "mtime": os.path.getmtime(src),
+                           "fingerprint": fingerprint(src, size)}
+        dst = targets[k]
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        if os.path.lexists(dst):
+            os.unlink(dst)          # only ever a symlink created by this command
+        os.symlink(src, dst)
+    provenance.write_json(a.out, rec)
 
 
 def cmd_validate_hifi(a):
-    res = validate.validate_hifi(_kv(a.stats), _kv(a.bam_count), a.inventory, a.genome_size)
+    res = validate.validate_hifi(_kv(a.stats), _kv(a.bam_count), a.inventory, a.genome_size,
+                                 readstats.aggregator_id())
     _emit(res, a.out, "HiFi input validation failed")
 
 
 def cmd_validate_ont(a):
-    res = validate.validate_ont(_kv(a.raw), _kv(a.filtered), a.merged, _kv(a.ids), a.min_len,
-                                a.min_retained, a.inventory, a.genome_size)
+    res = validate.validate_ont(_kv(a.input_stats), _kv(a.retained_stats), _kv(a.input_ids),
+                                _kv(a.retained_ids), a.min_len, a.min_retained, a.inventory,
+                                a.genome_size, readstats.aggregator_id())
     _emit(res, a.out, "ONT input validation failed")
 
 
 def cmd_validate_busco(a):
-    _emit(validate.validate_busco(a.json, a.dataset_cfg), a.out, "BUSCO validation failed")
+    pin = json.loads(a.pin) if a.pin else None
+    if pin is not None:
+        pin = dict(pin, name=a.lineage)
+    _emit(validate.validate_busco(a.json, a.dataset_cfg, a.expected_version, pin), a.out,
+          "BUSCO validation failed")
 
 
 def cmd_validate_merqury(a):
@@ -153,21 +209,34 @@ def cmd_validate_asm(a):
 
 def cmd_summarize(a):
     L = summary._load
+    opt = lambda p: L(p) if p else None   # noqa: E731
     hlog = validate.parse_hifiasm_log(a.hifiasm_log)
-    rows = summary.build(a.sample, a.method, a.science_version, L(a.hifi),
-                         L(a.ont) if a.ont else None, L(a.kmer), L(a.asm_p), L(a.asm_a),
-                         [L(b) for b in a.busco or []], L(a.merqury) if a.merqury else None, hlog)
+    method_rec = opt(a.method_record)
+    if method_rec and a.method_fingerprint and method_rec["fingerprint"] != a.method_fingerprint:
+        sys.exit(f"{a.sample}/{a.method}: assembly was produced with method fingerprint "
+                 f"{method_rec['fingerprint']}, but the current method definition is "
+                 f"{a.method_fingerprint}. Method files are immutable: restore it or create a "
+                 "new method_id.")
+    imported = opt(a.imported)
+    rows = summary.build(a.sample, a.method, a.science_version, opt(a.hifi), opt(a.ont),
+                         opt(a.kmer), L(a.asm_p), opt(a.asm_a), [L(b) for b in a.busco or []],
+                         opt(a.merqury), hlog,
+                         source="imported_legacy" if imported else "pipeline",
+                         validation_id=a.validation_id,
+                         method_fingerprint=(method_rec or {}).get("fingerprint", ""))
     summary.write_tsv(rows, a.out_tsv)
-    provenance.write_json(a.out_json, {"ok": True, "sample": a.sample, "method_id": a.method,
-                                       "rows": rows, "hifiasm_log": hlog,
-                                       "validated_records": [p for p in
-                                           [a.hifi, a.ont, a.kmer, a.asm_p, a.asm_a, a.merqury,
-                                            *(a.busco or [])] if p]})
+    provenance.write_json(a.out_json, {
+        "ok": True, "sample": a.sample, "method_id": a.method,
+        "assembly_source": "imported_legacy" if imported else "pipeline",
+        "validation_id": a.validation_id, "science_version": a.science_version,
+        "method_record": method_rec, "imported": imported, "rows": rows, "hifiasm_log": hlog,
+        "validated_records": [p for p in [a.hifi, a.ont, a.kmer, a.asm_p, a.asm_a, a.merqury,
+                                          *(a.busco or [])] if p]})
 
 
 def cmd_combine(a):
     rows = [r for p in a.inputs for r in summary.read_tsv(p)]
-    rows.sort(key=lambda r: (r["sample"], r["method_id"], r["busco_lineage"]))
+    rows.sort(key=lambda r: (r["sample"], r["method_id"], r.get("busco_lineage", "")))
     summary.write_tsv(rows, a.out)
 
 
@@ -194,6 +263,11 @@ def main(argv=None):
     s.add_argument("command", nargs=argparse.REMAINDER)
     s.set_defaults(func=cmd_run)
 
+    s = sub.add_parser("identity", help="write the validation-identity record")
+    s.add_argument("--out", required=True)
+    s.add_argument("--json", required=True)
+    s.set_defaults(func=lambda a: provenance.write_json(a.out, json.loads(a.json)))
+
     s = sub.add_parser("readstats", help="aggregate `seqkit fx2tab -n -l [-q]` from stdin")
     s.add_argument("--tech", choices=["hifi", "ont"], required=True)
     s.add_argument("--has-qual", action="store_true")
@@ -214,16 +288,32 @@ def main(argv=None):
     s.add_argument("--window-lo", type=float, default=0.35)
     s.add_argument("--window-hi", type=float, default=0.65)
     s.add_argument("--max-ratio", type=float, default=0.25)
+    s.add_argument("--min-local-max-ratio", type=float, default=0.05)
+    s.add_argument("--smooth-frac", type=float, default=0.1)
+    s.add_argument("--k", type=int, default=21)
     s.add_argument("--out", required=True)
     s.set_defaults(func=cmd_kmer_screen)
 
-    s = sub.add_parser("kmer-gate")
+    s = sub.add_parser("kmer-assess")
     s.add_argument("--screen", required=True)
     s.add_argument("--sample", required=True)
     s.add_argument("--samples", required=True)
+    s.add_argument("--review-id", default="")
     s.add_argument("--block", action="store_true")
     s.add_argument("--out", required=True)
-    s.set_defaults(func=cmd_kmer_gate)
+    s.set_defaults(func=cmd_kmer_assess)
+
+    s = sub.add_parser("method-snapshot")
+    s.add_argument("--method-file", required=True)
+    s.add_argument("--science-version", type=int, required=True)
+    s.add_argument("--out", required=True)
+    s.set_defaults(func=cmd_method_snapshot)
+
+    s = sub.add_parser("import-assembly")
+    for k in ("sample", "aid", "gfa", "fa", "log", "link-gfa", "link-fa", "link-log", "out"):
+        s.add_argument(f"--{k}", required=True)
+    s.add_argument("--register")
+    s.set_defaults(func=cmd_import_assembly)
 
     s = sub.add_parser("validate-hifi")
     s.add_argument("--stats", nargs="+", required=True, help="INPUT_ID=stats.json")
@@ -234,10 +324,10 @@ def main(argv=None):
     s.set_defaults(func=cmd_validate_hifi)
 
     s = sub.add_parser("validate-ont")
-    s.add_argument("--raw", nargs="+", required=True)
-    s.add_argument("--filtered", nargs="+", required=True)
-    s.add_argument("--ids", nargs="+", required=True)
-    s.add_argument("--merged", required=True)
+    s.add_argument("--input-stats", nargs="+", required=True, help="INPUT_ID=stats.json")
+    s.add_argument("--retained-stats", nargs="+", required=True)
+    s.add_argument("--input-ids", nargs="+", required=True)
+    s.add_argument("--retained-ids", nargs="+", required=True)
     s.add_argument("--min-len", type=int, required=True)
     s.add_argument("--min-retained", type=int, default=1)
     s.add_argument("--inventory", required=True)
@@ -248,6 +338,9 @@ def main(argv=None):
     s = sub.add_parser("validate-busco")
     s.add_argument("--json", required=True)
     s.add_argument("--dataset-cfg")
+    s.add_argument("--lineage")
+    s.add_argument("--expected-version")
+    s.add_argument("--pin", help="JSON object of pinned dataset fields")
     s.add_argument("--out", required=True)
     s.set_defaults(func=cmd_validate_busco)
 
@@ -265,12 +358,12 @@ def main(argv=None):
     s.set_defaults(func=cmd_validate_asm)
 
     s = sub.add_parser("summarize")
-    for k in ("sample", "method", "hifi", "kmer", "asm-p", "asm-a", "hifiasm-log",
-              "out-json", "out-tsv"):
+    for k in ("sample", "method", "asm-p", "hifiasm-log", "out-json", "out-tsv", "validation-id"):
         s.add_argument(f"--{k}", required=True)
     s.add_argument("--science-version", type=int, required=True)
-    s.add_argument("--ont")
-    s.add_argument("--merqury")
+    for k in ("hifi", "kmer", "asm-a", "ont", "merqury", "method-record", "method-fingerprint",
+              "imported"):
+        s.add_argument(f"--{k}")
     s.add_argument("--busco", nargs="*")
     s.set_defaults(func=cmd_summarize)
 

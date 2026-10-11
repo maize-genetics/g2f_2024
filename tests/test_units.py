@@ -37,7 +37,16 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(ont["ont"]["min_read_len"], 50000)
         self.assertEqual(ont["args"], ["-l0"])
         self.assertEqual(ont["expected_version"], "0.25.0-r726")
-        self.assertEqual(cfg["science"]["qc"]["busco"]["lineages"], ["poales_odb12"])
+        self.assertEqual(list(cfg["science"]["qc"]["busco"]["lineages"]), ["poales_odb12.2"])
+        self.assertEqual(cfg["science"]["qc"]["busco"]["lineages"]["poales_odb12.2"]
+                         ["datasets_version"], "odb12.2")
+        self.assertFalse(cfg["science"]["kmer"]["screen"]["block_assembly_on_flag"])
+        ext = cfg["external_assemblies"]["PHBW8"]
+        self.assertEqual(set(ext), {"legacy_hifi_ont_l0", "legacy_hifi_l0", "legacy_hifi_default"})
+        self.assertTrue(ext["legacy_hifi_ont_l0"]["p_ctg_fa"].endswith(
+            "hifiasm_v0.25.0/ont_hifi/PHBW8_HiFi_Nano_l0.bp.p_ctg.fa"))
+        self.assertIn("prefiltered_ont",
+                      cfg["samples"]["PHBW8"]["acknowledge"]["PHBW8_ONT_gt50kb.fastq.gz"])
         self.assertIn("PHBW8", cfg["samples"])
         self.assertEqual(cfg["samples"]["PHBW8"]["aliases"], ["EB2_PHBW8"])
 
@@ -100,7 +109,7 @@ class ReadStatsTest(unittest.TestCase):
             self.assertEqual(s["n_reads"], 2)
             self.assertEqual(s["census"], {"runA": 1, "runB": 1})
             with gzip.open(ids, "rt") as fh:
-                self.assertEqual(fh.read().split(), ["uuid-1", "uuid-2"])
+                self.assertEqual(fh.read(), "uuid-1\t60000\nuuid-2\t70000\n")
         finally:
             shutil.rmtree(tmp)
 
@@ -139,36 +148,78 @@ class ValidateTest(unittest.TestCase):
         bad = validate.validate_hifi({"a": self.hstats("a", ["m1"])}, {"a": cnt}, self.inv, 10000)
         self.assertFalse(bad["ok"])
 
-    def ont_case(self, filt_n=(3, 2), merged_n=5, ids=(["r1", "r2"], ["r3"])):
-        raw, filt, idp = {}, {}, {}
+    def ids_file(self, name, rows):
+        path = f"{self.tmp}/{name}.ids.gz"
+        with gzip.open(path, "wt") as fh:
+            fh.write("".join(f"{r}\t{n}\n" for r, n in rows))
+        return path
+
+    def ont_case(self, filt_n=(3, 2), ids=(["r1", "r2"], ["r3"]), prefiltered=()):
+        with open(self.inv) as fh:
+            inv = json.load(fh)
+        for i in inv["inputs"]:
+            if i["input_id"] in prefiltered:
+                i["notes"] = ["ack:prefiltered_ont"]
+        inv_path = jdump(f"{self.tmp}/inv2.json", inv)
+        sup, ret, sup_ids, ret_ids = {}, {}, {}, {}
         for iid, fn, rid in zip(("o1", "o2"), filt_n, ids):
-            raw[iid] = jdump(f"{self.tmp}/{iid}.raw.json", {"n_reads": 10, "total_bases": 300000,
-                                                            "duplicate_read_ids": 0})
-            filt[iid] = jdump(f"{self.tmp}/{iid}.f.json", {"n_reads": fn, "total_bases": fn * 60000,
-                                                           "min_len": 60000 if fn else 0})
-            idp[iid] = f"{self.tmp}/{iid}.ids.gz"
-            with gzip.open(idp[iid], "wt") as fh:
-                fh.write("\n".join(rid) + "\n")
-        merged = jdump(f"{self.tmp}/m.json", {"n_reads": merged_n, "total_bases": merged_n * 60000,
-                                              "read_n50": 60000})
-        return validate.validate_ont(raw, filt, merged, idp, 50000, 1, self.inv, 1000000)
+            sup[iid] = jdump(f"{self.tmp}/{iid}.in.json", {"n_reads": 10, "total_bases": 300000,
+                                                           "duplicate_read_ids": 0, "min_len": 1000})
+            ret[iid] = jdump(f"{self.tmp}/{iid}.ret.json", {"n_reads": fn, "total_bases": fn * 60000,
+                                                            "min_len": 60000 if fn else 0})
+            sup_ids[iid] = self.ids_file(f"{iid}.in", [(r, 30000) for r in rid])
+            ret_ids[iid] = self.ids_file(f"{iid}.ret", [(f"{iid}_{k}", 60000) for k in range(fn)])
+        return validate.validate_ont(sup, ret, sup_ids, ret_ids, 50000, 1, inv_path, 1000000)
 
     def test_ont_ok_reports_raw_and_retained(self):
         r = self.ont_case()
         self.assertTrue(r["ok"], r["errors"])
         self.assertEqual((r["raw_reads"], r["retained_reads"]), (20, 5))
+        self.assertEqual(r["input_type"], "raw")
         self.assertEqual(r["retained_approx_coverage"], 0.3)
+        self.assertEqual(r["retained_read_n50"], 60000)
+
+    def test_ont_prefiltered_yield_is_not_reported_as_raw(self):
+        r = self.ont_case(prefiltered=("o1", "o2"))
+        self.assertTrue(r["ok"], r["errors"])
+        self.assertEqual(r["input_type"], "prefiltered")
+        self.assertIsNone(r["raw_reads"])
+        self.assertIsNone(r["raw_bases"])
+        self.assertEqual(r["supplied_reads"], 20)
+        self.assertEqual(r["per_input"]["o1"]["yield_type"], "prefiltered_supplied")
+        self.assertTrue(r["warnings"])
+        mixed = self.ont_case(prefiltered=("o1",))
+        self.assertEqual(mixed["input_type"], "mixed")
+        self.assertIsNone(mixed["raw_reads"])
+
+    def test_prefiltered_file_with_short_reads_fails(self):
+        with open(self.inv) as fh:
+            inv = json.load(fh)
+        inv["inputs"][2]["notes"] = ["ack:prefiltered_ont"]
+        inv_path = jdump(f"{self.tmp}/inv3.json", inv)
+        st = jdump(f"{self.tmp}/pf.json", {"n_reads": 2, "total_bases": 100000, "min_len": 49999,
+                                           "duplicate_read_ids": 0})
+        ids = self.ids_file("pf", [("a", 49999), ("b", 50001)])
+        r = validate.validate_ont({"o1": st}, {"o1": st}, {"o1": ids}, {"o1": ids}, 50000, 1,
+                                  inv_path, 1000000)
+        self.assertFalse(r["ok"])
+        self.assertTrue(any("shorter than 50000" in e for e in r["errors"]))
 
     def test_ont_input_without_qualifying_reads_needs_review(self):
-        r = self.ont_case(filt_n=(3, 0), merged_n=3)
+        r = self.ont_case(filt_n=(3, 0))
         self.assertFalse(r["ok"])
         self.assertTrue(any("human review" in e for e in r["errors"]))
 
-    def test_ont_duplicate_ids_and_merge_mismatch(self):
-        r = self.ont_case(ids=(["r1", "r2"], ["r2"]), merged_n=4)
+    def test_ont_duplicate_ids_between_inputs(self):
+        r = self.ont_case(ids=(["r1", "r2"], ["r2"]))
         self.assertFalse(r["ok"])
         self.assertTrue(any("occurs in both" in e for e in r["errors"]))
-        self.assertTrue(any("merged" in e for e in r["errors"]))
+
+    def test_stats_from_other_aggregator_code_rejected(self):
+        st = self.hstats("a", ["m1"], aggregator_id="old")
+        r = validate.validate_hifi({"a": st}, {}, self.inv, 1000, aggregator="new")
+        self.assertFalse(r["ok"])
+        self.assertTrue(any("different read-statistics code" in e for e in r["errors"]))
 
     def test_busco_real_fixture(self):
         r = validate.validate_busco(os.path.join(FIX, "busco_short_summary_PHBW8_l0_liliopsida_odb10.json"),
@@ -179,6 +230,31 @@ class ValidateTest(unittest.TestCase):
         self.assertEqual(r["n_markers"], 3236)
         self.assertEqual(r["internal_stop_codon_count"], 127)
         self.assertEqual(r["gene_predictor"], "miniprot")
+
+    def test_busco_pinned_dataset_enforced(self):
+        fx = os.path.join(FIX, "busco_short_summary_PHBW8_l0_liliopsida_odb10.json")
+        cfg = write_bytes(f"{self.tmp}/dataset.cfg", b"name=liliopsida_odb10\ncreation_date=2024-01-08\n"
+                                                    b"number_of_BUSCOs=3236\nOrthoDB_version=10.1\n")
+        ok = validate.validate_busco(fx, cfg, "6.1.0", {"name": "liliopsida_odb10",
+                                                         "creation_date": "2024-01-08"})
+        self.assertTrue(ok["ok"], ok["errors"])
+        bad_ver = validate.validate_busco(fx, cfg, "6.0.0", None)
+        self.assertFalse(bad_ver["ok"])
+        wrong = validate.validate_busco(fx, cfg, "6.1.0", {"name": "poales_odb12.2",
+                                                            "datasets_version": "odb12.2"})
+        self.assertFalse(wrong["ok"])
+        self.assertTrue(any("odb12.2" in e for e in wrong["errors"]))
+        missing = validate.validate_busco(fx, f"{self.tmp}/nope.cfg", None, None)
+        self.assertFalse(missing["ok"])
+
+    def test_empty_alternate_contig_set_is_valid(self):
+        st = write_bytes(f"{self.tmp}/a.tsv", b"file\tformat\ttype\tnum_seqs\tsum_len\tmin_len\tavg_len"
+                         b"\tmax_len\tQ1\tQ2\tQ3\tsum_gap\tN50\tN50_num\tQ20(%)\tQ30(%)\tAvgQual\tGC(%)"
+                         b"\tsum_n\na.fa\t\t\t0\t0\t0\t0.0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0.00\t0.00\t0\n")
+        chk = jdump(f"{self.tmp}/c.json", {"ok": True, "n_fasta_records": 0, "fasta_total_bp": 0})
+        r = validate.validate_assembly_stats(st, chk)
+        self.assertTrue(r["ok"], r["errors"])
+        self.assertTrue(r["empty"])
 
     def test_busco_inconsistent_counts_fail(self):
         with open(os.path.join(FIX, "busco_short_summary_PHBW8_l0_liliopsida_odb10.json")) as fh:
@@ -247,6 +323,13 @@ class KmerScreenTest(unittest.TestCase):
         r = kmer.screen(self.hist(60, het_height=0.6))
         self.assertTrue(r["flagged"], r)
 
+    def test_real_meryl_spectrum_of_homozygous_data_not_flagged(self):
+        h = kmer.read_histogram(os.path.join(FIX, "meryl_k21_synthetic_homozygous_300kb.hist"))
+        r = kmer.screen(h)
+        self.assertEqual(r["main_peak_coverage"], 26)
+        self.assertFalse(r["flagged"], r)          # unsmoothed v1 flagged sampling noise
+        self.assertTrue(kmer.screen(h, smooth_frac=0, min_local_max_ratio=0)["flagged"])
+
     def test_short_histogram_is_error(self):
         self.assertFalse(kmer.screen([(1, 5), (2, 3)])["ok"])
 
@@ -256,6 +339,39 @@ class SummaryTest(unittest.TestCase):
         ok = {"ok": True}
         with self.assertRaises(ValueError):
             summary.build("S", "m", 1, {"ok": False}, None, ok, ok, ok, [], None, {})
+
+    def test_pipeline_summary_requires_read_records(self):
+        asm = {"ok": True, "n_contigs": 1, "total_bp": 10, "n50": 10, "l50": 1, "max_len": 10,
+               "gc_pct": 50, "gap_bp": 0}
+        with self.assertRaises(ValueError):
+            summary.build("S", "m", 1, None, None, None, asm, None, [], None, {})
+        rows = summary.build("S", "imported-x", 1, None, None, None, asm, None, [], None,
+                             {"version": "0.25.0-r726"}, source="imported_legacy", validation_id="v")
+        self.assertEqual(rows[0]["assembly_source"], "imported_legacy")
+        self.assertEqual(rows[0]["hifi_reads"], "")
+
+
+class IdentityTest(unittest.TestCase):
+    def test_validation_identity_tracks_science_methods_and_code(self):
+        from g2f.config import method_fingerprint, validation_identity
+        tmp = tempfile.mkdtemp()
+        try:
+            code = write_bytes(f"{tmp}/v.py", b"x = 1\n")
+            cfg = {"pipeline_dir": tmp, "science": {"a": 1},
+                   "methods": {"m": {"method_id": "m", "args": ["-l0"], "description": "d"}}}
+            v1, _ = validation_identity(cfg, [code])
+            cfg2 = dict(cfg, science={"a": 2})
+            self.assertNotEqual(v1, validation_identity(cfg2, [code])[0])
+            cfg3 = dict(cfg, methods={"m": {"method_id": "m", "args": ["-l1"], "description": "d"}})
+            self.assertNotEqual(v1, validation_identity(cfg3, [code])[0])
+            write_bytes(code, b"x = 2\n")
+            self.assertNotEqual(v1, validation_identity(cfg, [code])[0])
+            # description edits and file paths do not change the scientific fingerprint
+            m = {"method_id": "m", "args": ["-l0"], "description": "a", "_file": "/x"}
+            self.assertEqual(method_fingerprint(m),
+                             method_fingerprint(dict(m, description="b", _file="/y")))
+        finally:
+            shutil.rmtree(tmp)
 
 
 if __name__ == "__main__":

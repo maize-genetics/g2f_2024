@@ -8,8 +8,8 @@ external_inputs:
     ont:
       - /workdir/naj49/g2f_assemblies_2024/PHBW8_ONT_gt50kb.fastq.gz
 
-# Offline BUSCO lineage datasets (contains poales_odb12/, liliopsida_odb10/).
+# Offline BUSCO lineage datasets (must contain poales_odb12.2/).
 busco_lineage_dir: /home/naj49/busco_downloads/lineages
 
-# Where pbtk.sif lives (see README).
-containers_dir: /workdir/naj49/containers
+# Optional: where pbtk-3.5.0.sif lives if not ../containers (see README).
+# containers_dir: /workdir/naj49/g2f_assemblies_2024/containers

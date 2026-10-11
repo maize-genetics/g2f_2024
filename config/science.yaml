@@ -1,7 +1,7 @@
 # Scientific configuration (versioned). Changing anything here changes the
 # analysis: bump science_version and record the reason in
 # docs/scientific_decisions.md.
-science_version: 1
+science_version: 2
 
 # Automatic assembly method selection. The workflow inspects validated inputs
 # for each sample and picks exactly one primary method:
@@ -43,27 +43,44 @@ discovery:
   # samples.yaml, because their yield cannot be reported as "raw".
   ont_prefilter_suspect_min_len: 50000
 
-# Read k-mer screen (meryl) used both for Merqury and to flag samples whose
-# k-mer spectrum suggests residual heterozygosity. This is a screening
-# heuristic, not an estimate of heterozygosity.
+# Read k-mer database (meryl) used by Merqury, plus a diagnostic screen of
+# the k-mer spectrum for possible residual heterozygosity. The screen is an
+# UNCALIBRATED heuristic (docs/scientific_decisions.md D6): it reports and
+# warns; it does not estimate heterozygosity and does not block assembly.
 kmer:
   k: 21
   screen:
-    # Window around half the main peak coverage that is inspected for a
+    # Window around half the main peak coverage inspected for a
     # heterozygous peak.
     half_peak_window: [0.35, 0.65]
-    # Flag if the max histogram height in the half-peak window exceeds this
-    # fraction of the main peak height, or if a local maximum exists there.
+    # Warn if the (smoothed) max height in that window exceeds this fraction
+    # of the main peak height (~0.4% heterozygosity under idealised
+    # assumptions for k=21), or if a smoothed local maximum reaching
+    # min_local_max_ratio of the main peak exists there.
     max_half_peak_height_ratio: 0.25
-    # Halt before assembly when flagged, until samples.yaml records a review.
-    block_assembly_on_flag: true
+    min_local_max_ratio: 0.05
+    # Moving-average window as a fraction of the main peak coverage.
+    smooth_frac: 0.1
+    # false: diagnostic warning only (recorded in summaries).
+    # true: assembly waits for a kmer_review entry in samples.yaml.
+    block_assembly_on_flag: false
 
 qc:
   busco:
-    # Primary lineage. liliopsida_odb10 is retained only for historical
-    # comparison and is not interchangeable with odb12 results.
+    # Required BUSCO release (checked against each run's JSON).
+    expected_version: 6.1.0
+    # Primary lineage, pinned so all assemblies use the same dataset release.
+    # Every pinned field is checked against the lineage's dataset.cfg and the
+    # BUSCO result JSON; null fields are recorded but not enforced (fill them
+    # in once the dataset has been downloaded and inspected).
+    # liliopsida_odb10 (historical) and poales_odb12 (OrthoDB 12.1 release,
+    # created 2026-05-22) are NOT interchangeable with this dataset.
     lineages:
-      - poales_odb12
+      poales_odb12.2:
+        datasets_version: odb12.2
+        creation_date: "2026-05-13"     # from BUSCO file_versions.tsv; verify after download
+        number_of_BUSCOs: null
+        archive_md5: c2cf3a2db7a23f9b8c0d3d9af54c5132   # file_versions.tsv entry
     mode: genome
     # Historical PHBW8 runs used miniprot (BUSCO mode euk_genome_min).
     gene_predictor: miniprot

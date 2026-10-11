@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
-# Test stub for pbtk bam2fastq: bam2fastq -o PREFIX in.bam -> PREFIX.fastq.gz
+# Test stub for pbtk bam2fastq [-j N] -o PREFIX in.bam -> PREFIX.fastq.gz
+# Like the real tool (verified), it requires <in.bam>.pbi.
 set -euo pipefail
 if [[ "${1:-}" == "--version" ]]; then echo "bam2fastq stub"; exit 0; fi
-prefix=$2; bam=$3
+while [[ $# -gt 1 ]]; do
+  case "$1" in -j) shift 2;; -o) prefix=$2; shift 2;; *) shift;; esac
+done
+bam=$1
+[[ -e "$bam.pbi" ]] || { echo "PBI index I/O ERROR: $bam.pbi" >&2; exit 1; }
 "${SAMTOOLS:-samtools}" fastq "$bam" 2>/dev/null | gzip -c > "$prefix.fastq.gz"

@@ -1,5 +1,8 @@
 """Load and validate the layered workflow configuration."""
+import hashlib
+import json
 import os
+import re
 
 import yaml
 
@@ -81,18 +84,79 @@ def load_config(config, pipeline_dir):
     cfg["local"] = _load_yaml(_resolve(base, config.get("local", "config/local/local.yaml")),
                               required=False)
     tools_cfg = _load_yaml(_resolve(base, config.get("tools", "config/tools/biohpc.yaml")))
-    containers = cfg["local"].get("containers_dir") or tools_cfg.get("containers_dir", "")
+    containers = _resolve(base, cfg["local"].get("containers_dir")
+                          or tools_cfg.get("containers_dir") or ".")
     cfg["tools"] = {
         name: {k: str(v).replace("{containers}", str(containers)) for k, v in spec.items()}
         for name, spec in (tools_cfg.get("tools") or {}).items()
     }
     cfg["tmpdir"] = _resolve(base, config.get("tmpdir") or cfg["resources"].get("tmpdir", "../tmp"))
+    cfg["external_assemblies"] = load_external_assemblies(
+        _resolve(base, config.get("external_assemblies", "config/external_assemblies.yaml")), base)
     validate(cfg)
     return cfg
 
 
+EXTERNAL_KEYS = ("p_ctg_gfa", "p_ctg_fa", "hifiasm_log")
+EXTERNAL_QC = ("stats", "busco", "merqury")
+
+
+def load_external_assemblies(path, base):
+    """Read-only historical assemblies registered for QC benchmarking."""
+    data = _load_yaml(path, required=False)
+    if not data:
+        return {}
+    root = _resolve(base, data.get("root", "."))
+    out = {}
+    for sample, entries in sorted((data.get("assemblies") or {}).items()):
+        for aid, e in sorted((entries or {}).items()):
+            if not re.match(r"^[A-Za-z0-9_]+$", aid):
+                raise ConfigError(f"external assembly id {aid!r}: use letters, digits, '_'")
+            for k in EXTERNAL_KEYS:
+                if not e.get(k):
+                    raise ConfigError(f"external assembly {sample}/{aid}: missing {k}")
+            qc = list(e.get("qc") or [])
+            bad = set(qc) - set(EXTERNAL_QC)
+            if bad:
+                raise ConfigError(f"external assembly {sample}/{aid}: unknown qc {sorted(bad)}")
+            rec = {k: _resolve(root, e[k]) for k in EXTERNAL_KEYS}
+            rec.update(sample=sample, aid=aid, akey=f"imported-{aid}", qc=qc,
+                       description=e.get("description", ""), register=e.get("register"),
+                       read_types=list(e.get("read_types") or []))
+            out.setdefault(sample, {})[aid] = rec
+    return out
+
+
+def _canonical(obj):
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def method_fingerprint(m):
+    """Hash of the scientific content of a method (excludes description/file path)."""
+    core = {k: v for k, v in m.items() if not k.startswith("_") and k != "description"}
+    return hashlib.sha256(_canonical(core).encode()).hexdigest()[:12]
+
+
+def file_hash(path):
+    with open(path, "rb") as fh:
+        return hashlib.sha256(fh.read()).hexdigest()[:12]
+
+
+def validation_identity(cfg, code_files):
+    """Identity of everything that determines validation results and summaries.
+
+    Changes to science.yaml content, any method definition, or validation code
+    give a new identity; resources and tool paths do not."""
+    parts = {
+        "science": hashlib.sha256(_canonical(cfg["science"]).encode()).hexdigest()[:12],
+        "methods": {mid: method_fingerprint(m) for mid, m in sorted(cfg["methods"].items())},
+        "code": {os.path.relpath(p, cfg["pipeline_dir"]): file_hash(p) for p in sorted(code_files)},
+    }
+    vid = hashlib.sha256(_canonical(parts).encode()).hexdigest()[:10]
+    return vid, parts
+
+
 def validate(cfg):
-    import re
     res = cfg["results_dir"]
     for d in cfg["legacy_dirs"] + [cfg["data_dir"]]:
         if _inside(res, d) or _inside(d, res):

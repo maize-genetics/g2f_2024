@@ -3,6 +3,7 @@
 
 Only for plumbing tests; it performs no assembly."""
 import gzip
+import os
 import sys
 
 args = sys.argv[1:]
@@ -28,13 +29,16 @@ for path in reads:
         seqs += lines[1::4]
     else:
         seqs += [l for l in lines if not l.startswith(">")]
+open(f"{prefix}.ec.bin", "w").write("stub\n")
+if os.environ.get("STUB_HIFIASM_FAIL") == "1":
+    sys.stderr.write("stub hifiasm: simulated failure\n")
+    sys.exit(1)
 contigs = ["".join(seqs[0:3]), "".join(seqs[3:5]), seqs[5]]
 with open(f"{prefix}.bp.p_ctg.gfa", "w") as fh:
     for n, s in enumerate(contigs, 1):
         fh.write(f"S\tptg{n:06d}l\t{s}\tLN:i:{len(s)}\trd:i:30\n")
 with open(f"{prefix}.bp.a_ctg.gfa", "w") as fh:
     fh.write(f"S\tatg000001l\t{seqs[6]}\tLN:i:{len(seqs[6])}\trd:i:30\n")
-open(f"{prefix}.ec.bin", "w").write("stub\n")
 sys.stderr.write("[M::ha_ft_gen] peak_hom: 30; peak_het: -1\n")
 sys.stderr.write("[M::main] Version: 0.25.0-r726\n")
 sys.stderr.write("[M::main] CMD: hifiasm " + " ".join(args) + "\n")

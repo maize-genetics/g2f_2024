@@ -22,7 +22,15 @@ def _yield(stats):
     return {k: stats.get(k) for k in keys if k in stats}
 
 
-def validate_hifi(stats_paths, bam_count_paths, inventory_path, genome_size):
+def _check_aggregator(iid, stats, expected, errors):
+    got = stats.get("aggregator_id")
+    if expected and got != expected:
+        errors.append(f"{iid}: read statistics were produced by different read-statistics code "
+                      f"({got} vs current {expected}); regenerate them, e.g. "
+                      "snakemake --forcerun hifi_read_stats ont_input_stats ont_filtered_stats")
+
+
+def validate_hifi(stats_paths, bam_count_paths, inventory_path, genome_size, aggregator=None):
     """stats_paths/bam_count_paths: {input_id: path}."""
     inv = _load(inventory_path)
     acks = {i["input_id"]: i.get("notes", []) for i in inv["inputs"] if i["tech"] == "hifi"}
@@ -30,6 +38,7 @@ def validate_hifi(stats_paths, bam_count_paths, inventory_path, genome_size):
     total_reads = total_bases = 0
     for iid in sorted(stats_paths):
         s = _load(stats_paths[iid])
+        _check_aggregator(iid, s, aggregator, errors)
         per_input[iid] = _yield(s)
         if s["n_reads"] <= 0:
             errors.append(f"{iid}: no reads")
@@ -53,7 +62,7 @@ def validate_hifi(stats_paths, bam_count_paths, inventory_path, genome_size):
             per_input[iid]["bam_primary_records"] = n_bam
             if n_bam != s["n_reads"]:
                 errors.append(f"{iid}: converted FASTQ has {s['n_reads']} reads but BAM has "
-                              f"{n_bam} primary records")
+                              f"{n_bam} primary records (conversion incomplete or silently failed)")
         total_reads += s["n_reads"]
         total_bases += s["total_bases"]
     return {
@@ -67,62 +76,103 @@ def validate_hifi(stats_paths, bam_count_paths, inventory_path, genome_size):
 
 
 def _read_ids(path):
+    """Read the (read_id, length) table written by `readstats --ids-out`."""
+    out = []
     with gzip.open(path, "rt") as fh:
-        return [l.rstrip("\n") for l in fh if l.strip()]
+        for line in fh:
+            if line.strip():
+                rid, _, n = line.rstrip("\n").partition("\t")
+                out.append((rid, int(n) if n else None))
+    return out
 
 
-def validate_ont(raw_paths, filt_paths, merged_path, raw_id_paths, min_len, min_retained,
-                 inventory_path, genome_size):
+def _n50(lengths):
+    srt = sorted(lengths, reverse=True)
+    half, acc = sum(srt) / 2, 0
+    for n in srt:
+        acc += n
+        if acc >= half:
+            return n
+    return 0
+
+
+def validate_ont(input_paths, retained_paths, input_id_paths, retained_id_paths, min_len,
+                 min_retained, inventory_path, genome_size, aggregator=None):
+    """Validate the ONT reads passed to hifiasm --ul.
+
+    input_*: statistics/IDs of each ONT file as supplied. retained_*: of the
+    reads actually used (the length-filtered file, or the supplied file itself
+    for an acknowledged pre-filtered input). Yields of pre-filtered inputs are
+    reported as "supplied", never as raw sequencing yield."""
     inv = _load(inventory_path)
     notes = {i["input_id"]: i.get("notes", []) for i in inv["inputs"] if i["tech"] == "ont"}
     errors, warnings, per_input, owner = [], [], {}, {}
-    raw_reads = raw_bases = ret_reads = ret_bases = 0
-    for iid in sorted(raw_paths):
-        r, f = _load(raw_paths[iid]), _load(filt_paths[iid])
-        per_input[iid] = {"raw": _yield(r), "retained": _yield(f),
-                          "prefiltered_acknowledged": "ack:prefiltered_ont" in notes.get(iid, [])}
+    sup_reads = sup_bases = raw_reads = raw_bases = ret_reads = ret_bases = 0
+    any_prefiltered, retained_lengths = False, []
+    for iid in sorted(input_paths):
+        r, f = _load(input_paths[iid]), _load(retained_paths[iid])
+        _check_aggregator(iid, r, aggregator, errors)
+        _check_aggregator(iid, f, aggregator, errors)
+        pre = "ack:prefiltered_ont" in notes.get(iid, [])
+        any_prefiltered |= pre
+        per_input[iid] = {"yield_type": "prefiltered_supplied" if pre else "raw",
+                          "supplied": _yield(r), "retained": _yield(f),
+                          "refiltered": not pre}
         if r["n_reads"] <= 0:
             errors.append(f"{iid}: ONT file contains no reads")
         if f["n_reads"] == 0 and "ack:no_qualifying_reads" not in notes.get(iid, []):
             errors.append(f"{iid}: no reads >= {min_len} bp; human review required "
                           "(the workflow does not silently drop ONT inputs)")
         if f["n_reads"] and f["min_len"] < min_len:
-            errors.append(f"{iid}: filtered reads shorter than {min_len} bp present")
+            errors.append(f"{iid}: {'acknowledged pre-filtered file' if pre else 'filtered reads'} "
+                          f"contain reads shorter than {min_len} bp (shortest {f['min_len']}); "
+                          "it does not satisfy the method's ONT length threshold")
         if r.get("duplicate_read_ids"):
             errors.append(f"{iid}: {r['duplicate_read_ids']} duplicated read IDs within file")
-        for rid in _read_ids(raw_id_paths[iid]):
+        for rid, _ in _read_ids(input_id_paths[iid]):
             prev = owner.get(rid)
             if prev is not None and prev != iid:
                 errors.append(f"read ID {rid} occurs in both {prev} and {iid}: ONT inputs overlap")
                 break
             owner[rid] = iid
-        raw_reads += r["n_reads"]; raw_bases += r["total_bases"]
+        retained_lengths += [n for _, n in _read_ids(retained_id_paths[iid]) if n is not None]
+        sup_reads += r["n_reads"]; sup_bases += r["total_bases"]
+        if not pre:
+            raw_reads += r["n_reads"]; raw_bases += r["total_bases"]
         ret_reads += f["n_reads"]; ret_bases += f["total_bases"]
-    m = _load(merged_path)
-    if m["n_reads"] != ret_reads or m["total_bases"] != ret_bases:
-        errors.append(f"merged ONT input ({m['n_reads']} reads) != sum of filtered inputs "
-                      f"({ret_reads} reads)")
+    if len(retained_lengths) != ret_reads or sum(retained_lengths) != ret_bases:
+        errors.append("retained read-length table is inconsistent with retained statistics")
     if ret_reads < min_retained:
         errors.append(f"only {ret_reads} ONT reads retained (< {min_retained}); human review required")
-    if any(p["prefiltered_acknowledged"] for p in per_input.values()):
-        warnings.append("one or more ONT inputs were already length-filtered; 'raw' yield is the "
-                        "yield of the supplied file, not of the original sequencing run")
+    if any_prefiltered:
+        warnings.append("one or more ONT inputs were supplied already length-filtered; their "
+                        "yield is the supplied (derived) yield, and the original sequencing yield "
+                        "is unknown")
+    raw_known = not any_prefiltered
     return {
         "ok": not errors, "errors": errors[:50], "warnings": warnings, "tech": "ont",
         "min_read_len": min_len, "per_input": per_input,
-        "raw_reads": raw_reads, "raw_bases": raw_bases,
-        "raw_approx_coverage": round(raw_bases / genome_size, 3),
+        "input_type": ("raw" if raw_known else
+                       "prefiltered" if all(p["yield_type"] != "raw" for p in per_input.values())
+                       else "mixed"),
+        "supplied_reads": sup_reads, "supplied_bases": sup_bases,
+        "raw_reads": raw_reads if raw_known else None,
+        "raw_bases": raw_bases if raw_known else None,
+        "raw_approx_coverage": round(raw_bases / genome_size, 3) if raw_known else None,
         "retained_reads": ret_reads, "retained_bases": ret_bases,
-        "retained_read_n50": m.get("read_n50"),
+        "retained_read_n50": _n50(retained_lengths) if retained_lengths else 0,
         "retained_approx_coverage": round(ret_bases / genome_size, 3),
         "genome_size_bp": genome_size,
     }
 
 
-def validate_busco(json_path, lineage_cfg_path):
+def validate_busco(json_path, lineage_cfg_path, expected_version=None, pin=None):
+    """Check a BUSCO short-summary JSON for completeness, internal consistency,
+    the BUSCO version, and the pinned lineage dataset identity."""
     errors = []
     d = _load(json_path)
     res = d.get("results") or {}
+    params = d.get("parameters") or {}
     need = ["Complete percentage", "Single copy percentage", "Multi copy percentage",
             "Fragmented percentage", "Missing percentage", "n_markers", "Complete BUSCOs",
             "Single copy BUSCOs", "Multi copy BUSCOs", "Fragmented BUSCOs", "Missing BUSCOs"]
@@ -141,13 +191,37 @@ def validate_busco(json_path, lineage_cfg_path):
     if lineage_cfg_path and os.path.exists(lineage_cfg_path):
         with open(lineage_cfg_path) as fh:
             dataset = dict(l.strip().split("=", 1) for l in fh if "=" in l)
+    elif lineage_cfg_path:
+        errors.append(f"lineage dataset.cfg not found: {lineage_cfg_path}")
+    version = (d.get("versions") or {}).get("busco")
+    if expected_version and version != str(expected_version):
+        errors.append(f"BUSCO version {version} != required {expected_version}")
+    lineage = (d.get("lineage_dataset") or {}).get("name")
+    for key, want in (pin or {}).items():
+        if want is None or key == "archive_md5":
+            continue
+        if key == "datasets_version":
+            got = params.get("datasets_version")
+        elif key == "name":
+            got = lineage
+        else:
+            got = dataset.get(key)
+        if str(got) != str(want):
+            errors.append(f"lineage {key} = {got!r}, but the pinned dataset requires {want!r}")
+    if pin is not None and dataset.get("name") and lineage and dataset["name"] != lineage:
+        errors.append(f"BUSCO used lineage {lineage}, but dataset.cfg is for {dataset['name']}")
+    if pin is not None and dataset.get("number_of_BUSCOs") and res.get("n_markers") is not None \
+            and int(dataset["number_of_BUSCOs"]) != res["n_markers"]:
+        errors.append("n_markers does not match the lineage dataset.cfg number_of_BUSCOs")
     return {
         "ok": not errors, "errors": errors,
-        "lineage": (d.get("lineage_dataset") or {}).get("name"),
+        "lineage": lineage,
+        "datasets_version": params.get("datasets_version"),
         "lineage_dataset_cfg": dataset,
+        "pinned": pin,
         "versions": d.get("versions"),
-        "mode": (d.get("parameters") or {}).get("mode"),
-        "gene_predictor": (d.get("parameters") or {}).get("gene_predictor"),
+        "mode": params.get("mode"),
+        "gene_predictor": params.get("gene_predictor"),
         "one_line_summary": res.get("one_line_summary"),
         "complete_pct": res.get("Complete percentage"),
         "single_pct": res.get("Single copy percentage"),
@@ -226,8 +300,10 @@ def validate_assembly_stats(stats_path, gfa_check_path):
         errors.append(f"seqkit contig count {st['n_contigs']} != {chk.get('n_fasta_records')}")
     if st["total_bp"] != chk.get("fasta_total_bp"):
         errors.append(f"seqkit total {st['total_bp']} != {chk.get('fasta_total_bp')}")
-    if st["gc_pct"] is not None and not 0 < st["gc_pct"] < 100:
+    if st["n_contigs"] and st["gc_pct"] is not None and not 0 < st["gc_pct"] < 100:
         errors.append(f"GC% out of range: {st['gc_pct']}")
+    if st["n_contigs"] == 0:
+        st["empty"] = True     # e.g. hifiasm -l0 a_ctg with no alternate sequence
     return {"ok": not errors, "errors": errors, **st}
 
 
