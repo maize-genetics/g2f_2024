@@ -4,6 +4,9 @@
 # Registered for read-only QC (method_id "imported-<id>") in
 # config/external_assemblies.yaml; these runs were NOT produced by the
 # workflow, and their provenance limitations below still apply.
+# Note (2026-10-11): the two read files under `inputs` were later moved (original mtimes preserved)
+# to data/PHBW8/hifi/ and data/PHBW8/ont/. The paths below are where the
+# historical runs read them and are kept as recorded.
 sample: PHBW8
 alias_used: EB2_PHBW8
 root: /workdir/naj49/g2f_assemblies_2024/hifiasm_v0.25.0
