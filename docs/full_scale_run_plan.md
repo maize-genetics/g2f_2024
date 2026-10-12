@@ -147,7 +147,13 @@ python3 scripts/g2f_tool.py raw-release      # refresh; prints ELIGIBLE / keep p
 
 ## Resources (unchanged from the audit)
 
-256 logical CPUs; 2 TB RAM (ZFS cache reclaimable). hifiasm ≈ 2,600 CPU-h
+256 logical CPUs; 2 TB RAM (ZFS cache reclaimable). **Thread limit:**
+Snakemake's `--cores 40` counts declared rule threads only; pipe helpers and
+tools' main threads can add a few. From the launcher version after
+2026-10-12's run, each genotype is pinned with `taskset` to its own block of
+40 CPUs (`0-39`, `40-79`, `80-119`), so 120 CPUs is a hard limit. The
+2026-10-12 run itself is unpinned (about 111 cores busy during hifiasm,
+measured). hifiasm ≈ 2,600 CPU-h
 in total, with peak RSS ≈ 108-223 GB per genotype; 300 GB scheduling budget
 per genotype. Expected wall time ≈ 35-45 h.
 

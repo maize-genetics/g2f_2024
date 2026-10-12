@@ -5,14 +5,27 @@
 #      the gate also decides whether the prepared HiFi FASTQ is retained
 #   2. run the workflow for this genotype (target per_sample)
 #   3. record the outcome and refresh the raw-copy release report (no deletion)
+# Arguments: genotype, GNU parallel job slot (1..JOBS).
 # Environment (exported by the launcher): LOGDIR STATE RESDIR RESOURCES THREADS
-# MEM_GB RESERVE_GB JOBS RETAIN_MODE MAX_WAIT_H
+# MEM_GB RESERVE_GB JOBS RETAIN_MODE MAX_WAIT_H CPU_SLOTS (one CPU list per
+# slot; the genotype's Snakemake and every tool it runs are pinned to it)
 set -uo pipefail
 S=$1
+SLOT=${2:-}
 cd "$(dirname "$0")/.."
 log() { echo "[$(date '+%F %T')] $*" >> "$LOGDIR/launcher.log"; }
 status() { printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$S" "$1" "$2" "${START:-}" "$(date '+%F %T')" \
     "$LOGDIR/$S.log" >> "$LOGDIR/status.tsv"; }
+
+PIN=(); CPUS=unpinned
+if [[ -n "${CPU_SLOTS:-}" && -n "$SLOT" ]]; then
+    read -ra blocks <<< "$CPU_SLOTS"
+    CPUS=${blocks[$((SLOT - 1))]:-}
+    if [[ -z "$CPUS" ]]; then
+        log "$S: no CPU block for slot $SLOT (CPU_SLOTS=$CPU_SLOTS)"; status cpu_slot_error -; exit 6
+    fi
+    PIN=(taskset -c "$CPUS")
+fi
 
 waited=0
 while :; do
@@ -35,9 +48,9 @@ while :; do
 done
 RETAIN=$(python3 -c 'import json,sys; print(str(json.loads(sys.argv[1])["retain_prepared_hifi"]).lower())' "$out")
 START=$(date '+%F %T')
-log "START $S (retain_prepared_hifi=$RETAIN): $out"
+log "START $S (retain_prepared_hifi=$RETAIN, cpus=$CPUS): $out"
 
-snakemake per_sample --profile profiles/biohpc --rerun-triggers mtime --cores "$THREADS" \
+"${PIN[@]}" snakemake per_sample --profile profiles/biohpc --rerun-triggers mtime --cores "$THREADS" \
     --resources "mem_mb=$((MEM_GB * 1000))" --keep-going --rerun-incomplete \
     --config "resources=$RESOURCES" "only_samples=$S" "retain_prepared_hifi=$RETAIN" \
     > "$LOGDIR/$S.log" 2>&1

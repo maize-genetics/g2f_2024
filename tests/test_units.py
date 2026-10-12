@@ -454,3 +454,59 @@ class VerifyPreparedTest(unittest.TestCase):
         res = prepared.verify_prepared("G", inv, hv, ov, checks, {}, ["/r/h1.fastq.gz", "/r/o1.fastq.gz"],
                                        min_len=50000, manifest_rows=man[:2])   # o2 not in manifest
         self.assertIn("unexpected run", " ".join(res["errors"]))
+
+
+class CpuSlotsTest(unittest.TestCase):
+    def test_disjoint_blocks_and_refusal(self):
+        from g2f import cpus
+        self.assertEqual(cpus.compress([0, 1, 2, 5, 7, 8]), "0-2,5,7-8")
+        self.assertEqual(cpus.slots(3, 2, allowed=range(8)), ["0-1", "2-3", "4-5"])
+        self.assertEqual(cpus.slots(2, 2, allowed=[0, 1, 4, 5, 6]), ["0-1", "4-5"])
+        with self.assertRaises(ValueError):
+            cpus.slots(3, 40, allowed=range(119))                      # 120 > 119
+
+
+class GenotypeWrapperPinTest(unittest.TestCase):
+    """scripts/run_one_genotype.sh pins Snakemake (and so every tool) to its slot's CPU
+    block; without a slot (an older launcher) it runs unpinned as before."""
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="g2f_test_")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def run_wrapper(self, slot_args, cpu_slots):
+        import subprocess
+        import sys
+        t = self.tmp
+        os.makedirs(f"{t}/sandbox/scripts", exist_ok=True)
+        os.makedirs(f"{t}/bin", exist_ok=True)
+        os.makedirs(f"{t}/logs/state", exist_ok=True)
+        shutil.copy(f"{PIPELINE_DIR}/scripts/run_one_genotype.sh", f"{t}/sandbox/scripts/")
+        with open(f"{t}/sandbox/scripts/g2f_tool.py", "w") as fh:          # stub disk gate
+            fh.write("import json, sys\n"
+                     "if sys.argv[1] == 'disk-gate':\n"
+                     f"    open('{t}/logs/state/G.running', 'w').close()\n"
+                     "    print(json.dumps({'sample': 'G', 'start': True, 'retain_prepared_hifi': True}))\n")
+        with open(f"{t}/bin/snakemake", "w") as fh:                          # stub: record CPUs
+            fh.write(f"#!{sys.executable}\nimport os\n"
+                     f"open('{t}/affinity', 'w').write(' '.join(map(str, sorted(os.sched_getaffinity(0)))))\n")
+        os.chmod(f"{t}/bin/snakemake", 0o755)
+        env = dict(os.environ, PATH=f"{t}/bin:" + os.environ["PATH"], LOGDIR=f"{t}/logs",
+                   STATE=f"{t}/logs/state", RESDIR=f"{t}/results", RESOURCES="r.yaml", THREADS="1",
+                   MEM_GB="1", RESERVE_GB="0", JOBS="2", RETAIN_MODE="keep", MAX_WAIT_H="0")
+        if cpu_slots:
+            env["CPU_SLOTS"] = cpu_slots
+        r = subprocess.run(["bash", f"{t}/sandbox/scripts/run_one_genotype.sh", "G", *slot_args],
+                           env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr + open(f"{t}/logs/launcher.log").read())
+        with open(f"{t}/affinity") as fh:
+            return set(map(int, fh.read().split()))
+
+    def test_pinned_to_slot_block(self):
+        allowed = sorted(os.sched_getaffinity(0))
+        if len(allowed) < 2:
+            self.skipTest("needs 2 CPUs")
+        a, b = allowed[0], allowed[1]
+        self.assertEqual(self.run_wrapper(["2"], f"{a} {b}"), {b})
+        self.assertEqual(self.run_wrapper([], f"{a} {b}"), set(allowed))      # no slot: unpinned

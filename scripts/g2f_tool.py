@@ -16,8 +16,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from g2f import (archive, discovery, gfa, kmer, prepared, provenance, readstats,  # noqa: E402
-                 summary, validate)
+from g2f import (archive, cpus, discovery, gfa, kmer, prepared, provenance,  # noqa: E402
+                 readstats, summary, validate)
 
 PIPELINE_DIR = os.path.dirname(HERE)
 
@@ -353,6 +353,14 @@ def cmd_disk_estimates(a):
     provenance.write_json(a.out, est)
 
 
+def cmd_cpu_slots(a):
+    """Launcher: print one CPU list per genotype slot (space-separated), or fail."""
+    try:
+        print(" ".join(cpus.slots(a.jobs, a.threads)))
+    except ValueError as e:
+        sys.exit(f"cpu-slots: {e}")
+
+
 def cmd_disk_gate(a):
     """Decide (under a lock) whether a genotype may start now, and its FASTQ retention.
     Exit 0: start (state file written); 10: wait; 11: cannot fit even with nothing running."""
@@ -536,6 +544,11 @@ def main(argv=None):
     s.add_argument("--out", required=True)
     s.add_argument("--only", nargs="*")
     s.set_defaults(func=cmd_disk_estimates)
+
+    s = sub.add_parser("cpu-slots", help="launcher: disjoint CPU blocks, one per genotype slot")
+    s.add_argument("--jobs", type=int, required=True)
+    s.add_argument("--threads", type=int, required=True)
+    s.set_defaults(func=cmd_cpu_slots)
 
     s = sub.add_parser("disk-gate", help="launcher: may this genotype start now?")
     s.add_argument("--sample", required=True)

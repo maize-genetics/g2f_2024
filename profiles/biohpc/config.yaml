@@ -1,8 +1,12 @@
 # Snakemake profile for running directly on a BioHPC server (no scheduler).
 # Usage (from pipeline/):  snakemake --profile profiles/biohpc ...
 #
-# --cores caps the total threads of concurrently running jobs. Set it to what
-# you have reserved on the machine, not the machine's total.
+# --cores caps the total threads Snakemake schedules. Set it to what you have
+# reserved on the machine, not the machine's total. It counts declared rule
+# threads, not every helper process (pipes, a tool's main thread), so for a
+# hard limit also pin the run to that many CPUs, e.g.
+#   taskset -c 0-31 snakemake --profile profiles/biohpc --cores 32 ...
+# (scripts/run_all_assemblies.sh does this for each genotype.)
 cores: 32
 # Rerun a job only when its inputs are newer than its outputs. Code or
 # parameter edits must never silently trigger re-assembly; changed science

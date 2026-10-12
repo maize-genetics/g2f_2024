@@ -18,7 +18,9 @@
 #
 # Options:
 #   --jobs N            genotypes in parallel (default 3)
-#   --threads T         threads per genotype (default 40)
+#   --threads T         threads per genotype (default 40). Enforced: each running
+#                       genotype is pinned (taskset) to its own block of T CPUs,
+#                       so the run never uses more than jobs x threads CPUs
 #   --mem-gb G          memory budget per genotype for Snakemake scheduling (default 300)
 #   --reserve-gb R      free disk always kept in reserve by the disk gate (default 150)
 #   --retain-hifi M     prepared HiFi FASTQ retention: keep (default; nothing is
@@ -67,6 +69,9 @@ say "pipeline: $PIPE (git $(git rev-parse --short HEAD 2>/dev/null || echo '?')$
 command -v snakemake >/dev/null || die "snakemake not found (module load python/3.12.7)"
 SMK_VER=$(snakemake --version); [[ ${SMK_VER%%.*} -ge 8 ]] || die "Snakemake >= 8 required (found $SMK_VER)"
 command -v parallel >/dev/null || die "GNU parallel not found"
+command -v taskset >/dev/null || die "taskset not found (needed to enforce the thread limit)"
+CPU_SLOTS=$(python3 scripts/g2f_tool.py cpu-slots --jobs "$JOBS" --threads "$THREADS" 2>&1) \
+    || die "$CPU_SLOTS"
 python3 - "$PIPE" <<'EOF' || die "tool check failed (see above)"
 import os, shlex, sys, yaml
 sys.path.insert(0, os.path.join(sys.argv[1], "scripts"))
@@ -96,6 +101,7 @@ ARC_GB=$(awk '$1=="size"{print int($3/1e9)}' /proc/spl/kstat/zfs/arcstats 2>/dev
 say "memory: ${MEM_AVAIL_GB} GB available + ${ARC_GB} GB ZFS cache (reclaimable); budget ${JOBS} x ${MEM_GB} GB"
 (( JOBS * MEM_GB <= MEM_AVAIL_GB + ARC_GB )) || say "WARNING: memory budget exceeds available memory"
 say "load average: $(cut -d' ' -f1-3 /proc/loadavg); threads requested: ${JOBS} x ${THREADS} = $((JOBS * THREADS))"
+say "CPU blocks, one per running genotype (enforced with taskset): $CPU_SLOTS"
 
 # Genotypes, largest HiFi input first so the longest assembly does not run last.
 if [[ -z "$SAMPLES" ]]; then
@@ -145,7 +151,7 @@ import json, subprocess, sys
 git = lambda *a: subprocess.run(["git", *a], capture_output=True, text=True).stdout.strip()
 json.dump({"started": "$STAMP", "dry_run": bool($DRY), "git_commit": git("rev-parse", "HEAD"),
            "git_dirty": bool(git("status", "--porcelain")), "jobs": $JOBS, "threads": $THREADS,
-           "mem_gb_per_genotype": $MEM_GB, "resources": "$RESOURCES", "samples": "$SAMPLES".split(),
+           "mem_gb_per_genotype": $MEM_GB, "cpu_slots": "$CPU_SLOTS".split(), "resources": "$RESOURCES", "samples": "$SAMPLES".split(),
            "snakemake": "$SMK_VER", "free_disk_gb": $FREE_GB, "host": "$(hostname)"},
           open(sys.argv[1], "w"), indent=2)
 EOF
@@ -159,7 +165,7 @@ if [[ $DRY -eq 1 ]]; then
         say "$s: $(grep -m1 -E '^total' "$LOGDIR/$s.dryrun.log" | awk '{print $2}') jobs would run"
     done
     say "DRY RUN complete; nothing was executed. Command per genotype:"
-    say "  ${PER_GENO[*]} --config resources=$RESOURCES only_samples=<LINE>"
+    say "  taskset -c <CPU block> ${PER_GENO[*]} --config resources=$RESOURCES only_samples=<LINE>"
     exit 0
 fi
 
@@ -169,7 +175,7 @@ snakemake identity_stamp "${COMMON[@]}" --cores 1 --config "resources=$RESOURCES
     >> "$LOGDIR/launcher.log" 2>&1 || die "could not create the identity stamp"
 
 printf 'genotype\texit\tretain_prepared_hifi\tstarted\tended\tlog\n' > "$LOGDIR/status.tsv"
-export LOGDIR STATE RESDIR RESOURCES THREADS MEM_GB RESERVE_GB JOBS RETAIN_MODE MAX_WAIT_H
+export LOGDIR STATE RESDIR RESOURCES THREADS MEM_GB RESERVE_GB JOBS RETAIN_MODE MAX_WAIT_H CPU_SLOTS
 
 # Disk monitor: free space and results size every 10 minutes.
 ( set +e +o pipefail
@@ -188,7 +194,7 @@ trap 'kill $MONITOR 2>/dev/null' EXIT
 say "starting: ${JOBS} genotypes at a time, ${THREADS} threads each; logs in $LOGDIR"
 say "drain gracefully (finish running genotypes, start no new ones): touch $STATE/STOP"
 printf '%s\n' $SAMPLES | parallel -j "$JOBS" --halt never --joblog "$LOGDIR/joblog.tsv" \
-    bash scripts/run_one_genotype.sh {} || true
+    bash scripts/run_one_genotype.sh {} {%} || true
 
 python3 scripts/g2f_tool.py raw-release >> "$LOGDIR/launcher.log" 2>&1 || true
 FAILED=$(awk -F'\t' 'NR>1 && $2!=0{print $1}' "$LOGDIR/status.tsv" | tr '\n' ' ')

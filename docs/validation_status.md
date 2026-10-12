@@ -39,4 +39,5 @@ not operational validation.
 | Cleanup and retention (HiFi FASTQ retention switch; verified `.bin` removal) | Stub-tested (`test_cleanup_switches`) | First full-scale run |
 | Prepared-input gate before hifiasm; raw-copy release report; resuming after manual raw deletion | Unit- and stub-tested (`VerifyPreparedTest`, `test_raw_release_lifecycle`); manifest reconciliation checked on the real inventories of all nine genotypes | First full-scale run |
 | Disk gate / monitor / per-genotype wrapper | Unit-tested (`DiskPlanTest`); launcher run end to end in a stub sandbox, including resume ("Nothing to be done") | First full-scale run |
+| CPU pinning per genotype (hard thread limit) | Unit-tested (`CpuSlotsTest`); real wrapper pinned in a sandbox with a stub Snakemake (`GenotypeWrapperPinTest`) | Next launch |
 | Concurrent per-genotype Snakemake processes / launcher | Stub-tested (`test_concurrent_per_sample_processes`); launcher `--dry-run` on the real data (340 jobs) | First full-scale run |

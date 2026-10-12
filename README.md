@@ -206,6 +206,12 @@ bash scripts/run_all_assemblies.sh --dry-run        # preflight + per-line dry r
 nohup bash scripts/run_all_assemblies.sh > ../logs/launcher.$(date +%Y%m%d_%H%M%S).out 2>&1 &
 ```
 
+The thread limit is enforced: each running line is pinned (`taskset`) to
+its own block of `--threads` CPUs, so the run never uses more than
+jobs × threads CPUs, and the launcher refuses to start if that many are
+not available. When running Snakemake directly, `--cores` alone is not a
+hard limit; see `profiles/biohpc/config.yaml`.
+
 A disk gate starts a line only when its projected peak fits. hifiasm runs
 only after its prepared inputs pass verification, and the launcher reports
 which local raw BAM/tar copies are safe to delete by hand
