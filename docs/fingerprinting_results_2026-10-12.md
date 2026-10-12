@@ -126,3 +126,19 @@ insufficient. That justified the full run.
 | wall time | 54 min (whole Snakemake run) |
 | analysis | 6 min 43 s, peak RSS 2.2 GB, single thread |
 | disk | all fingerprint sketches and reports (pilot + full) 616 MB; no read copies |
+
+## Addendum: supplementary diagnostics (2026-10-12)
+
+The text above is preserved as written. `docs/fingerprinting_diagnostics_2026-10-12.md`
+re-examines GEMS-0061, GEMS-0113 and GEMS-0219 run 9 with read-only diagnostics
+(ONT-matched null, k = 21/31 values, cross-run replication, per-read marker
+co-occurrence, allele dosage, in-silico admixture). In brief: all nine
+genotype assignments are supported. No evidence of contamination by another
+panel genotype was found in any ONT set (indicative detection limit about
+1–3 %; lower-level, non-panel or non-maize contamination is not excluded).
+For GEMS-0061 and GEMS-0113, the foreign alleles are real sequence at
+near-genomic dosage, which indicates genetic discordance between the HiFi
+and ONT sources and is not explained by low-level admixture. GEMS-0113's
+FBLL signal is part panel composition and part FBLL-like haplotype segments;
+its dosage argues against FBLL admixture. The biological provenance is not
+established. Classifications and thresholds are unchanged.
