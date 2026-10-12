@@ -15,6 +15,8 @@
 def ont_stream(s, iid, threads):
     """Shell fragment that writes the ONT reads of one input as FASTQ to stdout."""
     i = get_input(s, "ont", iid)
+    if discovery.is_released(i):
+        return released_guard(s, "ont", iid, "")
     if i.format == "bam":
         return f"{tool('samtools')} fastq -F 0x900 -@ {threads} {q(i.path)} 2>/dev/null"
     if i.format == "tar":
@@ -73,7 +75,7 @@ def ont_tools(s):
 rule ont_input_stats:
     """QC of each ONT file as supplied (raw, or acknowledged pre-filtered)."""
     input:
-        reads=lambda wc: get_input(wc.sample, "ont", wc.iid).path,
+        reads=lambda wc: raw_input(wc.sample, "ont", wc.iid),
         inventory=ancient(f"{RES}/{{sample}}/inputs/inventory.json"),
     output:
         stats=f"{RES}/{{sample}}/reads/ont/stats/{{iid}}.input.json",
@@ -98,7 +100,7 @@ rule ont_input_stats:
 rule ont_filter:
     """Keep reads >= minlen bp (method parameter ont.min_read_len)."""
     input:
-        reads=lambda wc: get_input(wc.sample, "ont", wc.iid).path,
+        reads=lambda wc: raw_input(wc.sample, "ont", wc.iid),
         inventory=ancient(f"{RES}/{{sample}}/inputs/inventory.json"),
     output:
         reads=f"{RES}/{{sample}}/reads/ont/ul{{minlen}}/{{iid}}.fastq.gz",

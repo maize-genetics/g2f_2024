@@ -90,6 +90,11 @@ def load_config(config, pipeline_dir):
         name: {k: str(v).replace("{containers}", str(containers)) for k, v in spec.items()}
         for name, spec in (tools_cfg.get("tools") or {}).items()
     }
+    # Optional raw-data manifest (run accounting) and remote-copy check table
+    # (raw-copy release report); both may be absent.
+    cfg["raw_manifest"] = _resolve(base, config.get("raw_manifest")) if config.get("raw_manifest") else None
+    cfg["remote_copy_table"] = (_resolve(base, config.get("remote_copy_table"))
+                                if config.get("remote_copy_table") else None)
     cfg["fingerprint"] = (_load_yaml(_resolve(base, config.get("fingerprint", "config/fingerprint.yaml")),
                                      required=False).get("fingerprint") or {})
     cfg["tmpdir"] = _resolve(base, config.get("tmpdir") or cfg["resources"].get("tmpdir", "../tmp"))

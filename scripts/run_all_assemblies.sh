@@ -20,25 +20,29 @@
 #   --jobs N            genotypes in parallel (default 3)
 #   --threads T         threads per genotype (default 40)
 #   --mem-gb G          memory budget per genotype for Snakemake scheduling (default 300)
-#   --min-free-gb F     refuse to start with less free disk on results/ (default 800)
+#   --reserve-gb R      free disk always kept in reserve by the disk gate (default 150)
+#   --retain-hifi M     prepared HiFi FASTQ retention: auto (default; decided per
+#                       genotype by the disk gate), keep, or temp (delete after use)
+#   --max-wait-h H      a genotype waiting this long for disk space fails (default 48)
 #   --samples "A B"     only these genotypes (default: all discovered), in this order
 #   --resources FILE    resources file (default config/resources/cbsuxm01_3x40.yaml)
 #   --dry-run           preflight + `snakemake -n` per genotype; executes nothing
-#   --force-disk        start even if free disk is below --min-free-gb (not advised)
 set -euo pipefail
 
-JOBS=3; THREADS=40; MEM_GB=300; MIN_FREE_GB=800; SAMPLES=""; DRY=0; FORCE_DISK=0
+JOBS=3; THREADS=40; MEM_GB=300; RESERVE_GB=150; RETAIN_MODE=auto; MAX_WAIT_H=48
+SAMPLES=""; DRY=0
 RESOURCES=config/resources/cbsuxm01_3x40.yaml
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --jobs) JOBS=$2; shift 2 ;;
         --threads) THREADS=$2; shift 2 ;;
         --mem-gb) MEM_GB=$2; shift 2 ;;
-        --min-free-gb) MIN_FREE_GB=$2; shift 2 ;;
+        --reserve-gb) RESERVE_GB=$2; shift 2 ;;
+        --retain-hifi) RETAIN_MODE=$2; shift 2 ;;
+        --max-wait-h) MAX_WAIT_H=$2; shift 2 ;;
         --samples) SAMPLES=$2; shift 2 ;;
         --resources) RESOURCES=$2; shift 2 ;;
         --dry-run) DRY=1; shift ;;
-        --force-disk) FORCE_DISK=1; shift ;;
         -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
@@ -83,12 +87,8 @@ EOF
 
 RESDIR=$(python3 -c "import os,yaml;print(os.path.normpath(os.path.join('$PIPE', yaml.safe_load(open('config/config.yaml'))['results_dir'])))")
 mkdir -p "$RESDIR"
-FREE_GB=$(( $(df --output=avail -k "$RESDIR" | tail -1) / 1024 / 1024 ))
-say "free disk on $(df --output=target "$RESDIR" | tail -1 | tr -d ' '): ${FREE_GB} GB (minimum ${MIN_FREE_GB} GB)"
-if (( FREE_GB < MIN_FREE_GB )); then
-    [[ $FORCE_DISK -eq 1 || $DRY -eq 1 ]] || die "not enough free disk; see docs/full_scale_run_plan.md (or --force-disk)"
-    say "WARNING: free disk below minimum"
-fi
+FREE_GB=$(( $(df --output=avail -B1 "$RESDIR" | tail -1) / 1000000000 ))
+say "free disk on $(df --output=target "$RESDIR" | tail -1 | tr -d ' '): ${FREE_GB} GB; reserve ${RESERVE_GB} GB; prepared HiFi FASTQ retention: ${RETAIN_MODE}"
 MEM_AVAIL_GB=$(awk '/MemAvailable/{print int($2/1024/1024)}' /proc/meminfo)
 ARC_GB=$(awk '$1=="size"{print int($3/1e9)}' /proc/spl/kstat/zfs/arcstats 2>/dev/null || echo 0)
 say "memory: ${MEM_AVAIL_GB} GB available + ${ARC_GB} GB ZFS cache (reclaimable); budget ${JOBS} x ${MEM_GB} GB"
@@ -107,6 +107,29 @@ print(" ".join(sorted(size, key=lambda s: -size[s])))')
 fi
 [[ -n "$SAMPLES" ]] || die "no genotypes discovered"
 say "genotypes (in start order): $SAMPLES"
+
+# Disk projection per genotype (scripts/g2f/diskplan.py) and the plan for this launch.
+STATE="$LOGDIR/state"; mkdir -p "$STATE"
+python3 scripts/g2f_tool.py discover --json 2>/dev/null \
+    | python3 scripts/g2f_tool.py disk-estimates --out "$STATE/estimates.json" --only $SAMPLES \
+    || die "disk estimates failed"
+python3 - "$STATE/estimates.json" "$FREE_GB" "$RESERVE_GB" "$JOBS" <<'EOF' | tee -a "$LOGDIR/launcher.log"
+import json, sys
+est = json.load(open(sys.argv[1])); free, reserve, jobs = float(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4])
+G = 1e9
+print(f"{'genotype':10s} {'peak GB':>8s} {'kept GB (FASTQ kept)':>21s} {'kept GB (FASTQ deleted)':>24s}")
+for s, e in est.items():
+    print(f"{s:10s} {e['peak']/G:8.0f} {e['persist_keep']/G:21.0f} {e['persist_temp']/G:24.0f}")
+temp = sum(e["persist_temp"] for e in est.values())
+keep = sum(e["persist_keep"] for e in est.values())
+trans = sorted((e["peak"] - e["persist_temp"] for e in est.values()), reverse=True)
+worst = temp + sum(trans[:jobs])
+print(f"final footprint: {temp/G:.0f} GB (all FASTQs deleted after use) to {keep/G:.0f} GB (all kept)")
+print(f"worst-case peak with FASTQs deleted after use: {worst/G:.0f} GB; free {free:.0f} GB, reserve {reserve:.0f} GB")
+if worst / G > free - reserve:
+    print("WARNING: even with every prepared FASTQ deleted after use, the worst case exceeds free space "
+          "minus reserve; the disk gate will make genotypes wait for space")
+EOF
 
 COMMON=(--profile profiles/biohpc --rerun-triggers mtime)
 say "whole-project dry run (discovery, configuration, DAG) ..."
@@ -141,25 +164,40 @@ fi
 # ------------------------------------------------------------------ execution
 say "creating the shared validation-identity stamp"
 snakemake identity_stamp "${COMMON[@]}" --cores 1 --config "resources=$RESOURCES" \
-    >> "$LOGDIR/launcher.log" 2>&1 \
-    || die "could not create the identity stamp"
+    >> "$LOGDIR/launcher.log" 2>&1 || die "could not create the identity stamp"
 
-printf 'genotype\texit\tlog\n' > "$LOGDIR/status.tsv"
+printf 'genotype\texit\tretain_prepared_hifi\tstarted\tended\tlog\n' > "$LOGDIR/status.tsv"
+export LOGDIR STATE RESDIR RESOURCES THREADS MEM_GB RESERVE_GB JOBS RETAIN_MODE MAX_WAIT_H
+
+# Disk monitor: free space and results size every 10 minutes.
+( set +e +o pipefail
+  printf 'time\tfree_GB\tresults_GB\trunning\n' > "$LOGDIR/disk.tsv"
+  while :; do
+      f=$(( $(df --output=avail -B1 "$RESDIR" | tail -1) / 1000000000 ))
+      r=$(du -s -B1 "$RESDIR" 2>/dev/null | awk '{printf "%d", $1/1e9}')
+      run=$(cd "$STATE" && ls *.running 2>/dev/null | sed 's/.running//' | tr '\n' ',')
+      printf '%s\t%s\t%s\t%s\n' "$(date '+%F %T')" "$f" "$r" "$run" >> "$LOGDIR/disk.tsv"
+      (( f < RESERVE_GB )) && echo "[$(date '+%F %T')] WARNING: free disk ${f} GB is below the reserve (${RESERVE_GB} GB); no new genotype will start" >> "$LOGDIR/launcher.log"
+      sleep 600
+  done ) &
+MONITOR=$!
+trap 'kill $MONITOR 2>/dev/null' EXIT
+
 say "starting: ${JOBS} genotypes at a time, ${THREADS} threads each; logs in $LOGDIR"
-# shellcheck disable=SC2016
+say "drain gracefully (finish running genotypes, start no new ones): touch $STATE/STOP"
 printf '%s\n' $SAMPLES | parallel -j "$JOBS" --halt never --joblog "$LOGDIR/joblog.tsv" \
-    'echo "[$(date "+%F %T")] START {}" >> '"$LOGDIR/launcher.log"';
-     '"${PER_GENO[*]}"' --config resources='"$RESOURCES"' only_samples={} > '"$LOGDIR"'/{}.log 2>&1;
-     rc=$?; printf "%s\t%s\t%s\n" {} $rc '"$LOGDIR"'/{}.log >> '"$LOGDIR"'/status.tsv;
-     echo "[$(date "+%F %T")] END {} exit=$rc" >> '"$LOGDIR/launcher.log"'; exit $rc' || true
+    bash scripts/run_one_genotype.sh {} || true
 
+python3 scripts/g2f_tool.py raw-release >> "$LOGDIR/launcher.log" 2>&1 || true
 FAILED=$(awk -F'\t' 'NR>1 && $2!=0{print $1}' "$LOGDIR/status.tsv" | tr '\n' ' ')
 if [[ -n "$FAILED" ]]; then
-    say "FAILED genotypes: $FAILED (see their logs; the others are complete). Fix, then rerun this"
-    say "launcher: completed work is not repeated. Project summary not built."
+    say "NOT COMPLETED: $FAILED (see status.tsv and their logs; the others are complete). Fix, then"
+    say "rerun this launcher: completed work is not repeated. Project summary not built."
     exit 1
 fi
 say "all genotypes completed; building the project summary table"
 snakemake all "${COMMON[@]}" --cores 4 --config "resources=$RESOURCES" >> "$LOGDIR/launcher.log" 2>&1 \
     || die "project summary failed"
 say "DONE. Summary: $(ls -t "$RESDIR"/summary/assembly_summary.*.tsv | head -1)"
+say "Raw copies eligible for manual deletion: $RESDIR/raw_release_report.tsv"
+exit 0

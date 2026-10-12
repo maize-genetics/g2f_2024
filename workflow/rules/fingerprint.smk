@@ -55,16 +55,16 @@ def fp_sketch_cmd(wc, input, output, threads):
            f"--min-read-len {FPCFG.get('min_read_len', 0)} --seed {FPCFG.get('sampling_seed', 1)} "
            f"--samtools {q(tool('samtools'))} --threads {threads} "
            f"--out-sig {q(output.sig)} --out-json {q(output.json)}")
-    return wrap("fingerprint_sketch", cmd, wc.sample,
+    return released_guard(wc.sample, wc.tech, wc.iid, wrap("fingerprint_sketch", cmd, wc.sample,
                 f"{FP_DIR}/sketches-{FP_SID}/{wc.sample}/{wc.tech}/{wc.iid}.prov.json",
                 tools=["fingerprint_python"], inputs=[i.path],
-                outputs=[output.sig, output.json])
+                outputs=[output.sig, output.json]))
 
 
 rule fingerprint_sketch:
     """Streaming FracMinHash sketch of one original read file (bounded prefix)."""
     input:
-        reads=lambda wc: get_input(wc.sample, wc.tech, wc.iid).path,
+        reads=lambda wc: raw_input(wc.sample, wc.tech, wc.iid),
     output:
         sig=f"{FP_DIR}/sketches-{FP_SID}/{{sample}}/{{tech}}/{{iid}}.sig.gz",
         json=f"{FP_DIR}/sketches-{FP_SID}/{{sample}}/{{tech}}/{{iid}}.json",

@@ -30,14 +30,21 @@ rules:
   fingerprint_sketch:  {threads: 3, mem_mb: 8000}
   fingerprint_analyze: {threads: 1, mem_mb: 32000}
 
-# Large, regenerable intermediates (needs approval before the first run;
-# see docs/full_scale_run_plan.md):
+# Retention and cleanup (approved 2026-10-12; docs/full_scale_run_plan.md).
+# Priority: (1) assemblies, QC, logs, configuration, provenance; (2) prepared
+# hifiasm inputs; (3) regenerable intermediates.
 cleanup:
-  # Converted HiFi FASTQ (~1.1 x BAM size) is deleted by Snakemake as soon as
-  # read stats, meryl and hifiasm have used it. It can be regenerated
-  # bit-for-bit from the original BAM.
-  temp_converted_hifi: true
-  # hifiasm ec/ovlp .bin files (~0.45 bytes per HiFi base: 35-65 GB per line)
-  # are removed after a SUCCESSFUL run only (listed first in
-  # <LINE>.asm.removed_bin_files.txt). Failed runs keep them for diagnosis.
+  # Converted HiFi FASTQ (prepared hifiasm input, ~1.1 x BAM size).
+  #   true:  keep (default when Snakemake is run directly).
+  #   false: Snakemake deletes it once read QC, the prepared-input check,
+  #          meryl and hifiasm have used it (regenerable from the BAM).
+  # scripts/run_all_assemblies.sh decides per genotype from the disk
+  # projection (--retain-hifi auto) and passes --config retain_prepared_hifi=.
+  # Filtered ONT (>= 50 kb) FASTQs are small and always kept.
+  retain_prepared_hifi: true
+  # hifiasm ec/ovlp/uidx .bin files (~0.45 bytes per HiFi base + ~13 GB:
+  # 40-75 GB per line) are removed only after hifiasm exited 0 AND the
+  # p_ctg GFA has sequence lines AND the a_ctg GFA exists; the removed files
+  # are listed in <LINE>.asm.removed_bin_files.txt and the job log. Failed or
+  # interrupted runs keep them.
   remove_hifiasm_bins_after_success: true

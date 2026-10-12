@@ -99,7 +99,8 @@ class WorkflowCase(unittest.TestCase):
             "data_dir": f"{t}/data", "results_dir": f"{t}/results", "legacy_dirs": [f"{t}/legacy"],
             "samples": f"{t}/samples.yaml", "tools": f"{t}/tools.yaml", "local": f"{t}/local.yaml",
             "science": f"{t}/science.yaml", "resources": f"{t}/resources.yaml",
-            "external_assemblies": f"{t}/external.yaml", "tmpdir": f"{t}/tmp"}
+            "external_assemblies": f"{t}/external.yaml", "tmpdir": f"{t}/tmp",
+            "raw_manifest": "", "remote_copy_table": ""}
         self.write_yaml("config.yaml", self.config)
 
     def build_data(self):
@@ -340,11 +341,11 @@ class WorkflowTest(WorkflowCase):
         self.assertEqual(r.returncode, 0, r.stderr[-3000:])
 
     def test_cleanup_switches(self):
-        """cleanup: converted HiFi FASTQ is temporary; hifiasm .bin files are removed only
-        after a successful run (a failed run keeps them for diagnosis)."""
+        """retain_prepared_hifi=false makes the converted HiFi FASTQ temporary; hifiasm .bin
+        files are removed only after a successful run (a failed run keeps them)."""
         self.write_yaml("resources.yaml", {"tmpdir": f"{self.tmp}/tmp", "rules": {"default": {
             "threads": 1, "mem_mb": 1000}}, "cleanup": {
-            "temp_converted_hifi": True, "remove_hifiasm_bins_after_success": True}})
+            "retain_prepared_hifi": False, "remove_hifiasm_bins_after_success": True}})
         d1 = f"{self.tmp}/results/S1/assembly/{HIFI_ONT}"
         d2 = f"{self.tmp}/results/S2/assembly/{HIFI_ONLY}"
         r = self.smk(f"{d2}/S2.asm.bp.p_ctg.gfa", env={"STUB_HIFIASM_FAIL": "1"})
@@ -383,6 +384,48 @@ class WorkflowTest(WorkflowCase):
         r = self.smk()                                                 # project table only
         self.assertEqual(r.returncode, 0, r.all[-3000:])
         self.assertEqual(set(self.summary_rows()), {"S1", "S2"})
+
+    def test_raw_release_lifecycle(self):
+        """Prepared inputs verified before hifiasm; a local raw BAM becomes eligible for manual
+        deletion only with a retained prepared FASTQ and a confirmed remote copy; after it is
+        deleted the workflow resumes with nothing to redo; deleting anything else stops it."""
+        bam = f"{self.tmp}/data/S1/hifi/{M1}.hifi_reads.bc2027.bam"
+        man, remote = f"{self.tmp}/manifest.tsv", f"{self.tmp}/remote.tsv"
+        src = f"/remote/Zea/{os.path.basename(bam)}"
+        with open(man, "w") as fh:
+            fh.write("genotype\tsample\ttechnology\tdataset_id\tsource_type\tsource_path\tsize_bytes\n"
+                     f"S1\tEB0\tHiFi\tx\tpacbio_hifi_bam\t{src}\t{os.path.getsize(bam)}\n")
+        self.config.update(raw_manifest=man, remote_copy_table=remote)
+        self.write_yaml("config.yaml", self.config)
+        r = self.smk()
+        self.assertEqual(r.returncode, 0, r.stderr[-4000:])
+        with open(f"{self.tmp}/results/S1/inputs/prepared_inputs.verified.json") as fh:
+            ver = json.load(fh)
+        self.assertTrue(ver["ok"])
+
+        def release():
+            out = subprocess.run([sys.executable, f"{PIPELINE_DIR}/scripts/g2f_tool.py", "raw-release",
+                                  "--config", f"{self.tmp}/config.yaml"], capture_output=True, text=True)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            with open(f"{self.tmp}/results/S1/inputs/raw_release.json") as fh:
+                return {os.path.basename(f["local_path"]): f for f in json.load(fh)["files"]}
+
+        rel = release()
+        self.assertFalse(rel[os.path.basename(bam)]["eligible"])           # remote not checked
+        with open(remote, "w") as fh:
+            fh.write("source_path\texists\tsize\tmtime\tchecked_at\n"
+                     f"{src}\tyes\t{os.path.getsize(bam)}\t0\t2026-10-12T00:00:00\n")
+        rel = release()
+        self.assertTrue(rel[os.path.basename(bam)]["eligible"], rel)
+        os.remove(bam)                                                      # the person deletes it
+        r = self.smk("--dry-run")
+        self.assertEqual(r.returncode, 0, r.all[-3000:])
+        self.assertFalse(jobs(r.all) & HEAVY, r.all[-3000:])
+        self.assertTrue(release()[os.path.basename(bam)]["eligible"])
+        os.remove(f"{self.tmp}/data/S1/ont/fc1.fastq.gz")                   # not eligible
+        r = self.smk("--dry-run")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("differ from the inventory", r.all)
 
     def test_kmer_flag_warns_by_default_and_review_is_recorded(self):
         r = self.smk(env={"STUB_KMER_HET": "1"})

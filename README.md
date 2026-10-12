@@ -206,6 +206,12 @@ bash scripts/run_all_assemblies.sh --dry-run        # preflight + per-line dry r
 nohup bash scripts/run_all_assemblies.sh > ../logs/launcher.$(date +%Y%m%d_%H%M%S).out 2>&1 &
 ```
 
+A disk gate starts a line only when its projected peak fits. hifiasm runs
+only after its prepared inputs pass verification, and the launcher reports
+which local raw BAM/tar copies are safe to delete by hand
+(`python3 scripts/g2f_tool.py raw-release`; the pipeline never deletes raw
+data).
+
 ### BioHPC execution profile
 
 `profiles/biohpc/config.yaml` runs jobs directly on the server you are

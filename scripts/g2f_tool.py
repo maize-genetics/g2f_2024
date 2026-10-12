@@ -15,8 +15,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from g2f import (archive, discovery, gfa, kmer, provenance, readstats, summary,  # noqa: E402
-                 validate)
+from g2f import (archive, discovery, gfa, kmer, prepared, provenance, readstats,  # noqa: E402
+                 summary, validate)
 
 PIPELINE_DIR = os.path.dirname(HERE)
 
@@ -247,6 +247,103 @@ def cmd_tar_fastq(a):
     sys.stderr.write(f"tar-fastq: streamed {n} members ({nbytes} bytes) from {a.archive}\n")
 
 
+def cmd_check_gz(a):
+    res = prepared.check_gz(a.path)
+    provenance.write_json(a.out, res)
+    if not res["gzip_ok"] or res["records"] is None:
+        sys.exit(f"check-gz: {a.path}: {res['error'] or 'not whole FASTQ records'}")
+
+
+def _tid_map(items):
+    out = {}
+    for k, v in _kv(items).items():
+        tech, _, iid = k.partition(":")
+        out[(tech, iid)] = v
+    return out
+
+
+def cmd_verify_prepared(a):
+    with open(a.inventory) as fh:
+        inv = json.load(fh)
+    load = lambda p: json.load(open(p)) if p else None  # noqa: E731
+    checks = {k: load(p) for k, p in _tid_map(a.checks).items()}
+    md5 = {}
+    for k, p in _tid_map(a.raw_md5).items():
+        with open(p) as fh:
+            md5[k] = fh.read().split()[0] if os.path.getsize(p) else None
+    res = prepared.verify_prepared(
+        a.sample, inv, load(a.hifi_validated), load(a.ont_validated), checks, md5,
+        a.hifiasm_inputs, min_len=a.min_len,
+        manifest_rows=prepared.load_manifest(a.manifest) if a.manifest else None)
+    _emit(res, a.out, f"prepared inputs of {a.sample} failed verification")
+
+
+def cmd_raw_release(a):
+    """Report which local raw copies are eligible for MANUAL deletion. Deletes nothing."""
+    import yaml
+    from g2f.config import load_config
+    with open(a.config) as fh:
+        cfg = load_config(yaml.safe_load(fh) or {}, PIPELINE_DIR)
+    res_dir = cfg["results_dir"]
+    remote = prepared.load_remote_table(cfg.get("remote_copy_table"))
+    rows = []
+    for sample in sorted(os.listdir(res_dir)) if os.path.isdir(res_dir) else []:
+        vpath = os.path.join(res_dir, sample, "inputs", "prepared_inputs.verified.json")
+        if a.only and sample not in a.only:
+            continue
+        if not os.path.exists(vpath):
+            continue
+        with open(vpath) as fh:
+            verified = json.load(fh)
+        files = prepared.release_report(verified, remote)
+        provenance.write_json(os.path.join(res_dir, sample, "inputs", "raw_release.json"),
+                              {"sample": sample, "verified": vpath,
+                               "remote_copy_table": cfg.get("remote_copy_table"),
+                               "generated_by": "g2f_tool.py raw-release", "files": files})
+        for f in files:
+            rows.append(dict(f, sample=sample, reasons="; ".join(f["reasons"])))
+    cols = ["sample", "tech", "input_id", "eligible", "local_present", "local_path", "size",
+            "raw_md5", "source_path", "remote_checked_at", "prepared_path", "status", "reasons"]
+    out = os.path.join(res_dir, "raw_release_report.tsv")
+    with open(out + ".tmp", "w") as fh:
+        fh.write("\t".join(cols) + "\n")
+        for r in rows:
+            fh.write("\t".join("" if r.get(c) is None else str(r.get(c)) for c in cols) + "\n")
+    os.replace(out + ".tmp", out)
+    n_el = sum(1 for r in rows if r["eligible"])
+    gb = sum(r["size"] for r in rows if r["eligible"] and r["local_present"]) / 1e9
+    print(f"{n_el} of {len(rows)} raw files eligible for manual deletion "
+          f"({gb:.1f} GB still on disk); report: {out}")
+    for r in rows:
+        print(f"  {'ELIGIBLE' if r['eligible'] else 'keep    '} {r['sample']:10s} "
+              f"{os.path.basename(r['local_path'])}" + ("" if r["eligible"] else f"  ({r['reasons']})"))
+
+
+def cmd_disk_estimates(a):
+    """Per-genotype disk estimates from `discover --json` output (stdin) for the launcher."""
+    from g2f import diskplan
+    recs = json.load(sys.stdin)["samples"]
+    est = {r["sample"]: diskplan.estimate(r) for r in recs if not a.only or r["sample"] in a.only}
+    provenance.write_json(a.out, est)
+
+
+def cmd_disk_gate(a):
+    """Decide (under a lock) whether a genotype may start now, and its FASTQ retention.
+    Exit 0: start (state file written); 10: wait; 11: cannot fit even with nothing running."""
+    import fcntl
+    import shutil
+    from g2f import diskplan
+    with open(os.path.join(a.state_dir, "gate.lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        free = shutil.disk_usage(a.results).free
+        d = diskplan.gate(a.state_dir, a.sample, a.results, a.reserve_gb * 1e9, a.jobs,
+                          a.mode, free)
+    print(json.dumps(d))
+    if d["start"]:
+        return
+    sys.exit(11 if not d["running"] else 10)
+
+
 def cmd_combine(a):
     rows = [r for p in a.inputs for r in summary.read_tsv(p)]
     rows.sort(key=lambda r: (r["sample"], r["method_id"], r.get("busco_lineage", "")))
@@ -383,6 +480,43 @@ def main(argv=None):
     s = sub.add_parser("tar-fastq", help="stream FASTQ members of an ONT tar (no extraction)")
     s.add_argument("archive")
     s.set_defaults(func=cmd_tar_fastq)
+
+    s = sub.add_parser("check-gz", help="gzip integrity, MD5 and FASTQ record count of a file")
+    s.add_argument("--path", required=True)
+    s.add_argument("--out", required=True)
+    s.set_defaults(func=cmd_check_gz)
+
+    s = sub.add_parser("verify-prepared", help="gate: verify prepared hifiasm inputs")
+    s.add_argument("--sample", required=True)
+    s.add_argument("--inventory", required=True)
+    s.add_argument("--hifi-validated", required=True)
+    s.add_argument("--ont-validated")
+    s.add_argument("--min-len", type=int)
+    s.add_argument("--checks", nargs="*", default=[], help="TECH:INPUT_ID=check.json")
+    s.add_argument("--raw-md5", nargs="*", default=[], help="TECH:INPUT_ID=file.md5")
+    s.add_argument("--manifest")
+    s.add_argument("--hifiasm-inputs", nargs="+", required=True)
+    s.add_argument("--out", required=True)
+    s.set_defaults(func=cmd_verify_prepared)
+
+    s = sub.add_parser("raw-release", help="report local raw copies eligible for manual deletion")
+    s.add_argument("--config", default=os.path.join(PIPELINE_DIR, "config", "config.yaml"))
+    s.add_argument("--only", nargs="*")
+    s.set_defaults(func=cmd_raw_release)
+
+    s = sub.add_parser("disk-estimates", help="launcher: disk estimates from discover --json")
+    s.add_argument("--out", required=True)
+    s.add_argument("--only", nargs="*")
+    s.set_defaults(func=cmd_disk_estimates)
+
+    s = sub.add_parser("disk-gate", help="launcher: may this genotype start now?")
+    s.add_argument("--sample", required=True)
+    s.add_argument("--state-dir", required=True)
+    s.add_argument("--results", required=True)
+    s.add_argument("--reserve-gb", type=float, default=150)
+    s.add_argument("--jobs", type=int, default=3)
+    s.add_argument("--mode", choices=["auto", "keep", "temp"], default="auto")
+    s.set_defaults(func=cmd_disk_gate)
 
     s = sub.add_parser("combine")
     s.add_argument("--inputs", nargs="+", required=True)

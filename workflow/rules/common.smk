@@ -153,6 +153,24 @@ def get_input(s, tech, iid):
     raise WorkflowError(f"unknown {tech} input {iid} for sample {s}")
 
 
+def raw_input(s, tech, iid):
+    """Path of an original input file for rule inputs, or nothing once its local
+    raw copy was released (deleted after verified preprocessing; see
+    g2f.discovery.released_inputs). Jobs whose outputs exist are then simply
+    not rerun; a job that would need the deleted file fails via released_guard."""
+    i = get_input(s, tech, iid)
+    return [] if discovery.is_released(i) else i.path
+
+
+def released_guard(s, tech, iid, cmd):
+    i = get_input(s, tech, iid)
+    if not discovery.is_released(i):
+        return cmd
+    return (f"echo 'Cannot run: the local raw copy {i.path} was released (deleted after verified "
+            "preprocessing) and the prepared file derived from it is missing. Restore the raw "
+            "file from the source storage node, then rerun.' >&2; exit 1")
+
+
 def method(m):
     return CFG["methods"][m]
 
@@ -195,6 +213,18 @@ def q(path):
 # Optional cleanup of large, regenerable intermediates (computational setting,
 # config/resources/*.yaml `cleanup:`; never changes results). Off by default.
 CLEANUP = CFG["resources"].get("cleanup") or {}
+
+
+def _flag(v):
+    return str(v).strip().lower() in ("1", "true", "yes", "keep")
+
+
+# Retention of the converted HiFi FASTQ (a prepared hifiasm input): kept unless
+# set to false, in which case Snakemake deletes it once read QC, the prepared-
+# input check, meryl and hifiasm have used it. --config retain_prepared_hifi=
+# overrides the resources file (the launcher sets it per genotype from the
+# disk projection).
+RETAIN_HIFI = _flag(config.get("retain_prepared_hifi", CLEANUP.get("retain_prepared_hifi", True)))
 
 
 shell.prefix(f"export TMPDIR={shlex.quote(CFG['tmpdir'])}; mkdir -p \"$TMPDIR\"; ")

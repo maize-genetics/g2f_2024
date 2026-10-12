@@ -30,6 +30,7 @@ def hifiasm_inputs(wc):
     d = {
         "hifi": all_hifi_reads(s),
         "hifi_ok": ancient(hifi_validated(s)),
+        "prepared_ok": ancient(prepared_verified(s)),
         "md5": [ancient(p) for p in all_checksums(s)],
         "inventory": ancient(inventory_path(s)),
         "method_file": ancient(method(m)["_file"]),
@@ -62,12 +63,19 @@ def hifiasm_cmd(wc, input, threads):
     argv += [q(p) for p in input.hifi]
     run = " ".join(argv)
     d = asm_dir(s, m)
-    # After a successful run only: list, then remove hifiasm's reusable
-    # intermediate .bin files (ec/ovlp; tens of GB). A failed run keeps them
-    # for diagnosis (and the next attempt refuses to start until they are
-    # moved aside).
-    tidy = (f" && {{ ls -l {s}.asm.*.bin > {s}.asm.removed_bin_files.txt 2>/dev/null || true; }}"
-            f" && rm -f {s}.asm.*.bin" if CLEANUP.get("remove_hifiasm_bins_after_success") else "")
+    # Only after hifiasm exited 0 (within the same job, so never while it runs),
+    # and only if the primary-contig GFA has sequence lines and the
+    # alternate-contig GFA exists: list, then remove hifiasm's reusable
+    # intermediate .bin files (ec/ovlp/uidx; tens of GB). Nothing downstream
+    # reads them. A failed or interrupted run keeps them for diagnosis (and the
+    # next attempt refuses to start until a person moves them aside).
+    tidy = ""
+    if CLEANUP.get("remove_hifiasm_bins_after_success"):
+        rec = f"{s}.asm.removed_bin_files.txt"
+        tidy = (f" && if grep -q -m1 '^S' {s}.asm.bp.p_ctg.gfa && test -f {s}.asm.bp.a_ctg.gfa; then "
+                f"{{ date '+removed %F %T after successful hifiasm:'; ls -l {s}.asm.*.bin; }} > {rec} "
+                f"2>/dev/null || true; rm -f {s}.asm.*.bin; cat {rec} >&2; "
+                f"else echo 'hifiasm outputs not verified: .bin files kept' >&2; fi")
     snap = (f"{TOOL} method-snapshot --method-file {q(meth['_file'])} "
             f"--science-version {SCI['science_version']} --out {q(method_record_path(s, m))}")
     return wrap(

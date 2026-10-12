@@ -29,6 +29,8 @@ def bam2fastq_cmd(wc, input, output, threads):
     a symlink in results/: reuse an existing .pbi, otherwise build one there.
     bam2fastq can exit 0 with an empty FASTQ when the index is unusable, so
     validate_hifi_reads compares read counts with the BAM record count."""
+    if discovery.is_released(get_input(wc.sample, "hifi", wc.iid)):
+        return released_guard(wc.sample, "hifi", wc.iid, "")
     bam = input.bam
     work = output[0][:-len(".fastq.gz")] + ".pbtk"
     link = f"{work}/in.bam"
@@ -36,19 +38,19 @@ def bam2fastq_cmd(wc, input, output, threads):
              else f"{tool('pbindex')} -j {threads} {q(link)}")
     cmd = (f"mkdir -p {q(work)} && ln -sfn {q(bam)} {q(link)} && {index} && "
            f"{tool('bam2fastq')} -j {threads} -o {q(output[0][:-len('.fastq.gz')])} {q(link)}")
-    return wrap("hifi_bam_to_fastq", cmd, wc.sample,
-                prov_path(wc.sample, "hifi_bam_to_fastq", wc.iid),
-                tools=["bam2fastq", "pbindex"], inputs=[bam], outputs=[output[0]])
+    return released_guard(wc.sample, "hifi", wc.iid, wrap(
+        "hifi_bam_to_fastq", cmd, wc.sample, prov_path(wc.sample, "hifi_bam_to_fastq", wc.iid),
+        tools=["bam2fastq", "pbindex"], inputs=[bam], outputs=[output[0]]))
 
 
 rule hifi_bam_to_fastq:
     input:
-        bam=lambda wc: get_input(wc.sample, "hifi", wc.iid).path,
+        bam=lambda wc: raw_input(wc.sample, "hifi", wc.iid),
         inventory=ancient(f"{RES}/{{sample}}/inputs/inventory.json"),
     output:
-        # temp: deleted by Snakemake once read stats, meryl and hifiasm have used
-        # it (cleanup.temp_converted_hifi); regenerated from the BAM if needed.
-        (temp if CLEANUP.get("temp_converted_hifi") else (lambda p: p))(
+        # Prepared hifiasm input. Kept by default; temporary when
+        # retain_prepared_hifi is false (regenerable from the BAM while it exists).
+        ((lambda p: p) if RETAIN_HIFI else temp)(
             f"{RES}/{{sample}}/reads/hifi/converted/{{iid}}.fastq.gz"),
     log:
         prov=f"{RES}/{{sample}}/provenance/hifi_bam_to_fastq/{{iid}}.json",
@@ -64,7 +66,7 @@ rule hifi_bam_to_fastq:
 rule bam_record_count:
     """Primary-record count of a HiFi BAM, to verify the conversion is complete."""
     input:
-        bam=lambda wc: get_input(wc.sample, "hifi", wc.iid).path,
+        bam=lambda wc: raw_input(wc.sample, "hifi", wc.iid),
     output:
         f"{RES}/{{sample}}/reads/hifi/converted/{{iid}}.bam_primary_records.txt",
     log:
@@ -73,11 +75,11 @@ rule bam_record_count:
     resources:
         mem_mb=R("bam_record_count")["mem_mb"],
     params:
-        cmd=lambda wc, input, output, threads: wrap(
+        cmd=lambda wc, input, output, threads: released_guard(wc.sample, "hifi", wc.iid, wrap(
             "bam_record_count",
             f"{tool('samtools')} view -c -F 0x900 -@ {threads} {q(input.bam)} > {q(output[0])}",
             wc.sample, prov_path(wc.sample, "bam_record_count", wc.iid),
-            tools=["samtools"], inputs=[input.bam], outputs=[output[0]]),
+            tools=["samtools"], inputs=[input.bam], outputs=[output[0]])),
     shell:
         "{params.cmd}"
 

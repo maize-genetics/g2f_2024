@@ -494,6 +494,38 @@ def _classify(key, path, sample, tech, aux_suffixes, issues):
     return None
 
 
+RELEASE_NOTE = "released: local raw copy deleted after verified preprocessing"
+
+
+def released_inputs(results_dir, sample):
+    """Inputs whose local raw copy was deleted after being listed as eligible in
+    results/<LINE>/inputs/raw_release.json (written by `g2f_tool.py raw-release`).
+    They are reconstructed from the recorded inventory so that results built from
+    them stay valid; any other missing file still changes the inventory and stops
+    the workflow."""
+    rel = os.path.join(results_dir, sample, "inputs", "raw_release.json")
+    inv = os.path.join(results_dir, sample, "inputs", "inventory.json")
+    if not (os.path.exists(rel) and os.path.exists(inv)):
+        return []
+    import json
+    with open(rel) as fh:
+        eligible = {f["local_path"] for f in json.load(fh).get("files", []) if f.get("eligible")}
+    with open(inv) as fh:
+        recorded = json.load(fh)["inputs"]
+    out = []
+    for r in recorded:
+        if r["path"] in eligible and not os.path.exists(r["path"]):
+            inp = InputFile(**{k: v for k, v in r.items() if k in InputFile.__dataclass_fields__})
+            inp.notes = list(inp.notes) + [RELEASE_NOTE]
+            out.append(inp)
+    return out
+
+
+def is_released(inp):
+    notes = inp.notes if hasattr(inp, "notes") else inp.get("notes", [])
+    return RELEASE_NOTE in notes
+
+
 def discover(cfg):
     """Discover all inputs. Returns (inputs_by_sample, issues)."""
     sci = cfg["science"].get("discovery") or {}
@@ -540,11 +572,19 @@ def discover(cfg):
                     candidates.append((sample, tech, os.path.basename(p), p, "external"))
 
     only = set(cfg.get("only_samples") or [])
+    released = {}
+    if os.path.isdir(cfg.get("results_dir") or ""):
+        for sample in sorted(os.listdir(cfg["results_dir"])):
+            if only and sample not in only:
+                continue
+            rel = released_inputs(cfg["results_dir"], sample)
+            if rel:
+                released[sample] = rel
     # Sample directories with no files yet (e.g. data still in transfer) are
     # skipped, but reported so a run never silently omits a sample.
     # A sample requested explicitly (only_samples) that has no reads is an
     # error, unless it has a registered historical assembly (imported_qc).
-    with_files = {c[0] for c in candidates}
+    with_files = {c[0] for c in candidates} | set(released)
     if os.path.isdir(data_dir):
         for sample in sorted(os.listdir(data_dir)):
             if (sample.startswith(".") or sample in with_files or sample in only
@@ -623,6 +663,9 @@ def discover(cfg):
                                 f"under acknowledge: {{{key}: {{prefiltered_ont: <reason>}}}} in "
                                 "samples.yaml.", [path]))
 
+    for sample, rel in released.items():
+        have = {os.path.realpath(i.path) for i in inputs.get(sample, [])}
+        inputs.setdefault(sample, []).extend(i for i in rel if os.path.realpath(i.path) not in have)
     for sample in sorted(inputs):
         _check_sample(sample, inputs[sample], issues)
     _check_cross_sample(inputs, issues)

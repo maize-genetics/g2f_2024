@@ -377,3 +377,80 @@ class IdentityTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DiskPlanTest(unittest.TestCase):
+    """Start gate and prepared-FASTQ retention decisions of the full-scale launcher."""
+
+    def setUp(self):
+        from g2f import diskplan
+        self.dp = diskplan
+        rec = lambda bam: {"inputs": [{"tech": "hifi", "status": "use", "format": "bam",  # noqa: E731
+                                       "size": bam, "notes": []},
+                                      {"tech": "ont", "status": "use", "format": "tar",
+                                       "size": 10e9, "notes": []}]}
+        self.est = {s: diskplan.estimate(rec(b)) for s, b in
+                    (("A", 80e9), ("B", 50e9), ("C", 50e9), ("D", 40e9))}
+
+    def test_estimate_components(self):
+        e = self.est["A"]
+        self.assertAlmostEqual(e["peak"], e["persist_keep"] + e["bins"], delta=2)
+        self.assertAlmostEqual(e["persist_keep"] - e["persist_temp"], e["conv"], delta=2)
+
+    def test_start_and_retention(self):
+        d = self.dp.decide("A", self.est, 2000e9, {}, ["A", "B", "C", "D"], 150e9, 3)
+        self.assertTrue(d["start"] and d["retain_prepared_hifi"])
+        d = self.dp.decide("A", self.est, 600e9, {}, ["A", "B", "C", "D"], 150e9, 3)
+        self.assertTrue(d["start"])
+        self.assertFalse(d["retain_prepared_hifi"])                 # space needed later
+        d = self.dp.decide("A", self.est, 600e9, {}, ["A", "B", "C", "D"], 150e9, 3, mode="keep")
+        self.assertTrue(d["retain_prepared_hifi"])
+
+    def test_running_genotypes_reserve_their_remaining_growth(self):
+        run = {"B": {"used": 10e9, "assembled": False}, "C": {"used": 10e9, "assembled": False}}
+        free = self.est["A"]["peak"] + 150e9 + 50e9
+        d = self.dp.decide("A", self.est, free, run, ["A", "D"], 150e9, 3)
+        self.assertFalse(d["start"])
+        run = {k: dict(v, assembled=True, used=self.est[k]["persist_keep"]) for k, v in run.items()}
+        d = self.dp.decide("A", self.est, free, run, ["A", "D"], 150e9, 3)
+        self.assertTrue(d["start"])
+
+    def test_resumed_genotype_needs_only_what_is_missing(self):
+        own = {"used": self.est["A"]["persist_keep"], "assembled": True}
+        d = self.dp.decide("A", self.est, 200e9, {}, ["A"], 150e9, 3, own=own)
+        self.assertTrue(d["start"])
+
+
+class VerifyPreparedTest(unittest.TestCase):
+    """Run accounting of the pre-hifiasm gate against the raw-data manifest."""
+
+    def _inv(self, *inputs):
+        return {"inputs": [dict(tech=t, input_id=i, status=st, path=f"/d/G/{t}/{n}", format=fmt,
+                                size=sz, fingerprint="f", notes=[])
+                           for t, i, st, n, fmt, sz in inputs]}
+
+    def test_excluded_run_is_accounted_and_counts_checked(self):
+        from g2f import prepared
+        inv = self._inv(("hifi", "h1", "use", "h1.bam", "bam", 10),
+                        ("ont", "o1", "use", "o1_fastq.tar", "tar", 20),
+                        ("ont", "o2", "excluded", "o2_fastq.tar", "", 0))
+        man = [{"genotype": "G", "technology": t, "source_path": f"/src/{n}", "size_bytes": str(sz)}
+               for t, n, sz in (("HiFi", "h1.bam", 10), ("ONT", "o1_fastq.tar", 20),
+                                ("ONT", "o2_fastq.tar", 5))]
+        chk = lambda p, n: {"path": p, "size": 1, "mtime": 1, "md5": "m", "gzip_ok": True,  # noqa: E731
+                            "error": "", "records": n}
+        checks = {("hifi", "h1"): chk("/r/h1.fastq.gz", 7), ("ont", "o1"): chk("/r/o1.fastq.gz", 3)}
+        hv = {"per_input": {"h1": {"n_reads": 7, "total_bases": 70, "bam_primary_records": 7}}}
+        ov = {"per_input": {"o1": {"retained": {"n_reads": 3, "total_bases": 30},
+                                   "supplied": {"n_reads": 9}}}}
+        res = prepared.verify_prepared("G", inv, hv, ov, checks, {}, ["/r/h1.fastq.gz", "/r/o1.fastq.gz"],
+                                       min_len=50000, manifest_rows=man)
+        self.assertTrue(res["ok"], res["errors"])
+        bad = dict(checks)
+        bad[("ont", "o1")] = chk("/r/o1.fastq.gz", 2)
+        res = prepared.verify_prepared("G", inv, hv, ov, bad, {}, ["/r/h1.fastq.gz", "/r/o1.fastq.gz"],
+                                       min_len=50000, manifest_rows=man)
+        self.assertFalse(res["ok"])
+        res = prepared.verify_prepared("G", inv, hv, ov, checks, {}, ["/r/h1.fastq.gz", "/r/o1.fastq.gz"],
+                                       min_len=50000, manifest_rows=man[:2])   # o2 not in manifest
+        self.assertIn("unexpected run", " ".join(res["errors"]))

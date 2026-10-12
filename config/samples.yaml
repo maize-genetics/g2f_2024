@@ -55,3 +55,32 @@ samples:
           convention (">50000" vs ">=50000") are unknown. The file is used
           as-is (not re-filtered or copied) after verifying every read is
           >= the method's 50,000 bp threshold.
+
+  GEMS-0219:
+    exclude_inputs:
+      10474838_9_PAQ86658_8f1582f4_fastq.tar: >
+        Aborted ONT run: 1 member, 52 reads, 180 kb, longest read 21.5 kb; no
+        reads >= 50 kb. Excluded 2026-10-12 by the project lead
+        (docs/input_audit_2026-10-12.md). Runs 10474838_9b and 10474838_9c are used.
+
+  GEMS-0061:
+    metadata:
+      ont_assignment: >
+        Provisionally accepted 2026-10-12 by the project lead. Fingerprinting
+        (docs/fingerprinting_results_2026-10-12.md): all three ONT runs match
+        GEMS-0061 best, but carry alleles absent from the HiFi sample
+        ("ambiguous"); the HiFi k-mer spectrum shows elevated heterozygosity.
+        Cause not determined (residual heterozygosity, different sampled
+        plants, admixture, or other); under review with collaborators.
+        Assembled HiFi+ONT as planned; interpret QC with this in mind.
+
+  GEMS-0113:
+    metadata:
+      ont_assignment: >
+        Provisionally accepted 2026-10-12 by the project lead. Fingerprinting
+        (docs/fingerprinting_results_2026-10-12.md): both ONT runs match
+        GEMS-0113 best, but carry alleles absent from the HiFi sample
+        (elevated for FBLL-distinct alleles; "ambiguous"); the HiFi k-mer
+        spectrum shows elevated heterozygosity. Cause not determined
+        (residual heterozygosity, different sampled plants, admixture, or
+        other); under review with collaborators. Assembled HiFi+ONT as planned.

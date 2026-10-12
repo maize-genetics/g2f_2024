@@ -26,6 +26,16 @@ methods_dir: config/methods
 resources: config/resources/default.yaml
 tools: config/tools/biohpc.yaml
 
+# Optional raw-data manifest (TSV: genotype, technology, source_path,
+# size_bytes). If set, every genotype's local runs are reconciled with it
+# before assembly (unexpected or missing runs stop that genotype).
+raw_manifest: ../data/g2f_9genotypes_raw_reads_manifest.tsv
+
+# Optional table written by scripts/check_remote_copies.sh confirming that the
+# original files still exist on the source storage node. Needed before any
+# local raw copy is reported as safe to delete (g2f_tool.py raw-release).
+remote_copy_table: ../data/remote_copies.tsv
+
 # Optional genotype fingerprinting settings (QC only; never affects assembly).
 fingerprint: config/fingerprint.yaml
 

@@ -70,7 +70,18 @@ highest score for another genotype's distinguishing alleles (~0 = absent).
    from a related but different seed source would look similar. The data
    cannot distinguish the two without pedigree/seed-lot information.
 
-## Implications for assembly (decisions for the researcher)
+## Decision (project lead, 2026-10-12)
+
+The GEMS-0061 and GEMS-0113 ONT assignments are **accepted provisionally**,
+and both lines are assembled HiFi+ONT `-l0` like the others. The cause of the
+alternative alleles is **not determined**: residual heterozygosity,
+biological differences between the sampled plants, admixture, or other
+causes remain possible. It will be discussed with collaborators. No
+definitive explanation should be assigned without further evidence. The
+options listed below were considered; option 1's HiFi-only comparison was
+**not** adopted.
+
+## Implications for assembly (as reviewed before the decision)
 
 * **Label assignments:** all supported or best-matching the label. Nothing
   suggests swapping files.

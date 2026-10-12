@@ -250,16 +250,33 @@ results labelled as valid, the workflow does the following.
   to assembly. Settings are outside `science.yaml` and outside the
   validation identity.
 
-## D12. Cleanup of regenerable intermediates for the full-scale run (proposed 2026-10-12; needs approval)
+## D12. Retention, cleanup and raw-copy release (approved 2026-10-12)
 
-* Converted HiFi FASTQ: temporary (regenerable from the BAM).
-* hifiasm `.bin` files: removed after a *successful* run only.
-* **Why.** Without cleanup, the nine assemblies need ~1.4 TB against
-  1.13 TB free (`docs/full_scale_run_plan.md`).
-* **Results unchanged.** Neither file is a result, and both are
-  reproducible. Configured as computational settings
-  (`config/resources/cbsuxm01_3x40.yaml`, `cleanup:`), off in
-  `default.yaml`.
+* **Priorities:** (1) assemblies, QC, logs, provenance; (2) prepared hifiasm
+  inputs (converted HiFi FASTQ, filtered ONT FASTQ); (3) regenerable
+  intermediates.
+* **hifiasm `.bin` files** are removed after hifiasm exits 0 and its GFA
+  outputs are verified; the removal is logged. Failed runs keep them.
+* **Prepared HiFi FASTQ:** kept, unless the full-scale launcher's disk gate
+  projects that keeping it would endanger later genotypes. Then it is
+  deleted after use (`retain_prepared_hifi=false`, recorded per genotype).
+* **Local raw BAM/tar copies** are never deleted by the pipeline. Eligibility
+  for manual deletion requires:
+  * verified prepared inputs;
+  * a retained, unchanged prepared file;
+  * a recorded raw MD5;
+  * a confirmed remote copy.
+
+  After deletion, the workflow uses the recorded inventory for those inputs;
+  any other missing input still stops it.
+* **Why:** ~1.2 TB free against ~1.4 TB without cleanup
+  (`docs/full_scale_run_plan.md`). No result changes.
+* **Also decided:**
+  * HiFi+ONT `-l0` for all nine genotypes;
+  * GEMS-0219 `10474838_9` excluded;
+  * GEMS-0061 and GEMS-0113 ONT assignments accepted provisionally
+    (fingerprinting ambiguous; cause undetermined; QC to be interpreted
+    with this in mind).
 
 ## Open questions for review
 

@@ -44,7 +44,7 @@ def all_checksums(s):
 rule checksum:
     """Full-file MD5 of an original input (read-only); computed once, recorded for provenance/SRA."""
     input:
-        reads=lambda wc: get_input(wc.sample, wc.tech, wc.iid).path,
+        reads=lambda wc: raw_input(wc.sample, wc.tech, wc.iid),
         inventory=ancient(f"{RES}/{{sample}}/inputs/inventory.json"),
     output:
         f"{RES}/{{sample}}/inputs/md5/{{tech}}/{{iid}}.md5",
@@ -56,9 +56,9 @@ rule checksum:
     resources:
         mem_mb=R("checksum")["mem_mb"],
     params:
-        cmd=lambda wc, input, output: wrap(
+        cmd=lambda wc, input, output: released_guard(wc.sample, wc.tech, wc.iid, wrap(
             "checksum", f"{tool('md5sum')} {q(input.reads)} > {q(output[0])}", wc.sample,
             prov_path(wc.sample, "checksum", f"{wc.tech}.{wc.iid}"), tools=["md5sum"],
-            inputs=[input.reads], outputs=[output[0]]),
+            inputs=[input.reads], outputs=[output[0]])),
     shell:
         "{params.cmd}"
