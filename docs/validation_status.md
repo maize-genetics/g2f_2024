@@ -1,4 +1,4 @@
-# Validation status of workflow components (2026-10-11)
+# Validation status of workflow components (2026-10-12)
 
 What each status means:
 
@@ -34,3 +34,7 @@ not operational validation.
 | Rerun policy (science/method/code/resource changes, failed-job resume, input changes) | Stub-tested (`test_workflow.py`) | — |
 | Imported historical assemblies (read-only QC) | **Real data:** PHBW8 legacy HiFi+ONT `-l0`; legacy files verified unchanged | Merqury (needs the read k-mer database) |
 | Summaries | Stub- and real-tool-tested | — |
+| ONT tar archives (stream pass members in place; fail excluded) | Fixture- and stub-tested (`test_fingerprint`, `test_ont_tar_streamed_in_place`). **Real data:** all 18 project tars discovered; streaming through seqkit verified on 2 tars; 18 tars sketched by fingerprinting (pilot + full) | Full ONT QC/filter run inside the workflow |
+| Genotype fingerprinting (optional) | Unit-, synthetic end-to-end (real sourmash 4.9.3) tested. **Real data:** pilot on 4 genotypes and full run on 9 (`docs/fingerprinting_results_2026-10-12.md`) | — |
+| Cleanup switches (temp converted FASTQ; hifiasm `.bin` after success) | Stub-tested (`test_cleanup_switches`) | First full-scale run |
+| Concurrent per-genotype Snakemake processes / launcher | Stub-tested (`test_concurrent_per_sample_processes`); launcher `--dry-run` on the real data (340 jobs) | First full-scale run |

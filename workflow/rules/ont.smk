@@ -1,8 +1,10 @@
 # ONT preprocessing: QC of each supplied file, ultra-long length filtering,
 # and the read list passed to hifiasm --ul.
 #
-# Inputs are basecalled FASTQ(.gz) or BAM (primary records only); raw signal
-# (POD5/FAST5) and ONT FASTA are rejected at discovery.
+# Inputs are basecalled FASTQ(.gz), BAM (primary records only), or an
+# uncompressed tar of MinKNOW FASTQ (pass members streamed in place, fail
+# members excluded; scripts/g2f/archive.py). Raw signal (POD5/FAST5) and ONT
+# FASTA are rejected at discovery.
 #
 # No unnecessary copies: hifiasm takes a comma-separated --ul file list, so
 # filtered files are never merged, and an acknowledged pre-filtered FASTQ is
@@ -15,6 +17,9 @@ def ont_stream(s, iid, threads):
     i = get_input(s, "ont", iid)
     if i.format == "bam":
         return f"{tool('samtools')} fastq -F 0x900 -@ {threads} {q(i.path)} 2>/dev/null"
+    if i.format == "tar":
+        # Pass members streamed from the archive in place (g2f.archive); never extracted.
+        return f"{TOOL} tar-fastq {q(i.path)} | {tool('seqkit')} seq -j {threads} -"
     return f"{tool('seqkit')} seq -j {threads} {q(i.path)}"
 
 

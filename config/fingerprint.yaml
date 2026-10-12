@@ -1,0 +1,41 @@
+# Optional genotype fingerprinting (k-mer sample-identity QC); see
+# docs/fingerprinting.md. Independent of assembly: these settings never change
+# assembly or validation results and are not part of the validation identity.
+# Outputs go to results/fingerprint/<settings hash>/, so changing anything
+# here writes a new result set instead of overwriting an old one.
+fingerprint:
+  # k-mer sizes sketched in one pass. 21 is primary: with ONT R10.4.1 HAC
+  # reads (~Q14, observed) about 0.96^21 = 42 % of true 21-mers are error-free,
+  # vs 28 % for k = 31, while 21-mers are still essentially unique in a 2.3 Gb
+  # genome. k = 31 is a robustness check.
+  ksizes: [21, 31]
+  primary_k: 21
+  # FracMinHash: keep hashes < 2^64/scaled (~1.1 M sampled 21-mers per maize
+  # genome). Deterministic (MurmurHash seed 42), the same sample for every input.
+  scaled: 2000
+  # Bounded sampling per input file: the first N bases of the read stream
+  # (BAM = ZMW order, ONT = acquisition order; unrelated to genome position).
+  # 25 Gb is ~11x of a 2.3 Gb genome per HiFi run (genotypes delivered as a
+  # single file get no more): enough to separate the single-copy peak from
+  # errors and to call absence (P(missed) ~ e^-11). The pilot showed that
+  # ~3.5x (8 Gb) is too shallow for a single-file genotype.
+  hifi_max_bases_per_input: 25000000000
+  # ONT: up to 10 Gb per run (most runs are smaller and are used in full).
+  ont_max_bases_per_input: 10000000000
+  # Optional seeded read subsample (1.0 = keep all reads of the prefix).
+  read_fraction: 1.0
+  # Seed for read subsampling and for the replicate-half split.
+  sampling_seed: 1
+  # Reads shorter than this are skipped (ONT adapters/fragments).
+  min_read_len: 1000
+  analysis:
+    # Solid HiFi k-mers: from the end of the error peak (>= floor) up to
+    # max_copy x the single-copy peak (drops repeats, organelles, contaminants).
+    min_count_floor: 2
+    max_copy: 3.0
+    # Two-sided 99.9 % binomial (Wilson) interval for each score.
+    interval_z: 3.29
+    # Genotype comparisons with fewer informative hashes are reported as unresolved.
+    min_informative_hashes: 200
+    # Haploid genome size (bp): expected depth anchors the single-copy peak.
+    genome_size: 2300000000

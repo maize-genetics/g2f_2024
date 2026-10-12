@@ -62,6 +62,12 @@ def hifiasm_cmd(wc, input, threads):
     argv += [q(p) for p in input.hifi]
     run = " ".join(argv)
     d = asm_dir(s, m)
+    # After a successful run only: list, then remove hifiasm's reusable
+    # intermediate .bin files (ec/ovlp; tens of GB). A failed run keeps them
+    # for diagnosis (and the next attempt refuses to start until they are
+    # moved aside).
+    tidy = (f" && {{ ls -l {s}.asm.*.bin > {s}.asm.removed_bin_files.txt 2>/dev/null || true; }}"
+            f" && rm -f {s}.asm.*.bin" if CLEANUP.get("remove_hifiasm_bins_after_success") else "")
     snap = (f"{TOOL} method-snapshot --method-file {q(meth['_file'])} "
             f"--science-version {SCI['science_version']} --out {q(method_record_path(s, m))}")
     return wrap(
@@ -70,7 +76,7 @@ def hifiasm_cmd(wc, input, threads):
         f"if ls {s}.asm.*.bin >/dev/null 2>&1; then echo 'Refusing to start: intermediate "
         f"hifiasm .bin files from an earlier attempt exist in {d}. Inspect them and move them "
         f"aside before re-running (hifiasm would silently reuse them).' >&2; exit 2; fi && "
-        f"{snap} && {run} > {s}.asm.stdout.log 2> {s}.asm.stderr.log",
+        f"{snap} && {run} > {s}.asm.stdout.log 2> {s}.asm.stderr.log{tidy}",
         s, prov_path(s, "hifiasm", m), tools=["hifiasm"], method_id=m,
         expect={"hifiasm": meth["expected_version"]},
         inputs=list(input.hifi) + (list(input.ont) if uses_ont(m) else []),

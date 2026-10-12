@@ -90,6 +90,8 @@ def load_config(config, pipeline_dir):
         name: {k: str(v).replace("{containers}", str(containers)) for k, v in spec.items()}
         for name, spec in (tools_cfg.get("tools") or {}).items()
     }
+    cfg["fingerprint"] = (_load_yaml(_resolve(base, config.get("fingerprint", "config/fingerprint.yaml")),
+                                     required=False).get("fingerprint") or {})
     cfg["tmpdir"] = _resolve(base, config.get("tmpdir") or cfg["resources"].get("tmpdir", "../tmp"))
     cfg["external_assemblies"] = load_external_assemblies(
         _resolve(base, config.get("external_assemblies", "config/external_assemblies.yaml")), base)

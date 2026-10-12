@@ -212,6 +212,55 @@ results labelled as valid, the workflow does the following.
   enabled. Merqury needs the full read k-mer database and is enabled
   separately once authorised.
 
+## D10. ONT tar deliveries are read in place, pass reads only (2026-10-12)
+
+* **Context.** The facility delivered every non-PHBW8 ONT run as one
+  uncompressed tar of MinKNOW `fastq_pass/*.fastq.gz` batches (18 tars,
+  105 GB). Extracting them would duplicate ~105 GB on a nearly full disk.
+* **Decision.** `.tar` is an accepted ONT input format.
+  * Members are streamed in natural batch order, straight into the existing
+    ONT QC and ≥ 50 kb filter; nothing is extracted.
+  * `fastq_fail` members are excluded: MinKNOW's own quality filter, the
+    usual definition of the usable read set. None of this project's tars
+    contain fail reads.
+  * Any other member type stops the workflow.
+* **Unchanged:** method selection (D2), the ≥ 50 kb filter (D3), duplicate
+  detection (read IDs; D4), and every validation gate.
+* **Consequence.** The yields reported for these runs are those of the pass
+  reads as delivered.
+
+## D11. Optional k-mer genotype fingerprinting (2026-10-12)
+
+* **Purpose.** Sequence-based evidence that each ONT read set belongs to its
+  labelled genotype (ONT labels were metadata-only).
+* **Method.** FracMinHash (sourmash 4.9.3, k = 21 primary, k = 31 check,
+  scaled = 2000). It uses pairwise "distinct allele" tests against every
+  HiFi genotype, normalized by recovery of panel-core k-mers, and a
+  threshold calibrated on HiFi leave-one-run-out and split-half controls
+  (`docs/fingerprinting.md`).
+* **Alternatives considered.**
+  * Mash screen / bottom-k MinHash: no abundance-filtered set algebra across
+    a panel.
+  * Exact k-mer counting of every read set with KMC/meryl: tens of GB per
+    read set and full passes over all data.
+  * Alignment to a reference genome followed by SNP genotype concordance:
+    needs a reference and alignments (hours per run), and uses only
+    reference-shared loci.
+* **Scope.** QC only. It never relabels or moves files and is not an input
+  to assembly. Settings are outside `science.yaml` and outside the
+  validation identity.
+
+## D12. Cleanup of regenerable intermediates for the full-scale run (proposed 2026-10-12; needs approval)
+
+* Converted HiFi FASTQ: temporary (regenerable from the BAM).
+* hifiasm `.bin` files: removed after a *successful* run only.
+* **Why.** Without cleanup, the nine assemblies need ~1.4 TB against
+  1.13 TB free (`docs/full_scale_run_plan.md`).
+* **Results unchanged.** Neither file is a result, and both are
+  reproducible. Configured as computational settings
+  (`config/resources/cbsuxm01_3x40.yaml`, `cleanup:`), off in
+  `default.yaml`.
+
 ## Open questions for review
 
 * What does hifiasm's coverage-estimate discrepancy for PHBW8 mean (audit,

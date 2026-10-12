@@ -15,6 +15,8 @@ import re
 import struct
 from dataclasses import asdict, dataclass, field
 
+from . import archive
+
 TECHS = ("hifi", "ont")
 READ_EXTS = {
     ".bam": "bam",
@@ -86,6 +88,8 @@ def fingerprint(path, size):
 
 
 def _strip_exts(name):
+    if archive.is_tar_name(name):
+        return name[: -len(".tar")], "tar"
     base = name
     if base.endswith(".gz"):
         base = base[:-3]
@@ -140,43 +144,48 @@ def parse_sam_header(text):
 def parse_fastx_head(path, compressed, n_records):
     """Return (format, [(header_line, read_len, mean_q_or_None), ...])."""
     opener = gzip.open if compressed else open
-    recs, read_bytes = [], 0
     with opener(path, "rt", errors="replace") as fh:
-        first = fh.readline()
-        read_bytes += len(first)
-        if first.startswith("@"):
-            fmt, header = "fastq", first
-            while header and len(recs) < n_records:
-                seq = fh.readline().strip()
-                plus = fh.readline()
-                qual = fh.readline().strip()
-                read_bytes += len(seq) + len(qual) + len(plus)
-                if not plus.startswith("+") or len(qual) != len(seq):
-                    raise ValueError("malformed FASTQ record near the start of the file")
-                q = (sum(ord(c) - 33 for c in qual) / len(qual)) if qual else None
-                recs.append((header[1:].rstrip("\n"), len(seq), q))
-                header = fh.readline()
-                if read_bytes > MAX_SAMPLE_BYTES:
-                    break
-        elif first.startswith(">"):
-            fmt, header, length = "fasta", first, 0
-            for line in fh:
-                read_bytes += len(line)
-                if line.startswith(">"):
-                    recs.append((header[1:].rstrip("\n"), length, None))
-                    if len(recs) >= n_records:
-                        header = None
-                        break
-                    header, length = line, 0
-                else:
-                    length += len(line.strip())
-                if read_bytes > MAX_SAMPLE_BYTES:
-                    raise ValueError("first records exceed 64 MiB; this does not look "
-                                     "like a read file (assembly?)")
-            if header is not None and length:
+        return parse_fastx_stream(fh, n_records)
+
+
+def parse_fastx_stream(fh, n_records):
+    """parse_fastx_head on an open text stream (e.g. a member of a tar archive)."""
+    recs, read_bytes = [], 0
+    first = fh.readline()
+    read_bytes += len(first)
+    if first.startswith("@"):
+        fmt, header = "fastq", first
+        while header and len(recs) < n_records:
+            seq = fh.readline().strip()
+            plus = fh.readline()
+            qual = fh.readline().strip()
+            read_bytes += len(seq) + len(qual) + len(plus)
+            if not plus.startswith("+") or len(qual) != len(seq):
+                raise ValueError("malformed FASTQ record near the start of the file")
+            q = (sum(ord(c) - 33 for c in qual) / len(qual)) if qual else None
+            recs.append((header[1:].rstrip("\n"), len(seq), q))
+            header = fh.readline()
+            if read_bytes > MAX_SAMPLE_BYTES:
+                break
+    elif first.startswith(">"):
+        fmt, header, length = "fasta", first, 0
+        for line in fh:
+            read_bytes += len(line)
+            if line.startswith(">"):
                 recs.append((header[1:].rstrip("\n"), length, None))
-        else:
-            raise ValueError("file does not start with '@' (FASTQ) or '>' (FASTA)")
+                if len(recs) >= n_records:
+                    header = None
+                    break
+                header, length = line, 0
+            else:
+                length += len(line.strip())
+            if read_bytes > MAX_SAMPLE_BYTES:
+                raise ValueError("first records exceed 64 MiB; this does not look "
+                                 "like a read file (assembly?)")
+        if header is not None and length:
+            recs.append((header[1:].rstrip("\n"), length, None))
+    else:
+        raise ValueError("file does not start with '@' (FASTQ) or '>' (FASTA)")
     return fmt, recs
 
 
@@ -217,6 +226,8 @@ def inspect_file(inp, n_records, issues):
     inp.fingerprint = fingerprint(path, inp.size)
     if ext_fmt == "bam":
         _inspect_bam(inp, n_records, issues)
+    elif ext_fmt == "tar":
+        _inspect_tar(inp, n_records, issues)
     else:
         try:
             fmt, recs = parse_fastx_head(path, inp.compressed, n_records)
@@ -243,6 +254,64 @@ def inspect_file(inp, n_records, issues):
             _identify_hifi_fastx(inp, recs, issues)
         else:
             _identify_ont(inp, [(_ont_header_fields(h), n, q) for h, n, q in recs], issues)
+
+
+def _inspect_tar(inp, n_records, issues):
+    """ONT FASTQ delivered as a tar archive (see g2f.archive): read in place."""
+    if inp.tech != "ont":
+        issues.append(Issue("error", "UNSUPPORTED_FORMAT", inp.sample,
+                            "tar archives are supported only for ONT FASTQ deliveries",
+                            "Provide HiFi reads as BAM or FASTQ(.gz).", [inp.path]))
+        return
+    try:
+        listing = archive.list_members(inp.path)
+    except archive.ArchiveError as exc:
+        issues.append(Issue("error", "BAD_FORMAT", inp.sample, str(exc),
+                            "Check the archive is complete (compare its size with the source).",
+                            [inp.path]))
+        return
+    if listing["errors"]:
+        issues.append(Issue("error", "BAD_ARCHIVE_CONTENT", inp.sample,
+                            "archive contains members other than FASTQ reads: "
+                            + "; ".join(listing["errors"][:5]),
+                            "Provide an archive of basecalled FASTQ only, or list it under "
+                            "exclude_inputs in samples.yaml.", [inp.path]))
+        return
+    if not listing["use"]:
+        issues.append(Issue("error", "NO_READS", inp.sample,
+                            "archive contains no usable (pass) FASTQ members",
+                            "Remove or replace the file.", [inp.path]))
+        return
+    inp.format = "tar"
+    inp.compressed = bool(listing["compressed"])
+    inp.identity.update(archive.summary(listing))
+    try:
+        stream = archive.open_text(inp.path, listing)
+        fmt, recs = parse_fastx_stream(_LineReader(stream), n_records)
+    except (ValueError, OSError, EOFError) as exc:
+        issues.append(Issue("error", "BAD_FORMAT", inp.sample,
+                            f"cannot parse reads in archive: {exc}",
+                            "Check the archive members are FASTQ.", [inp.path]))
+        return
+    if fmt != "fastq" or not recs:
+        issues.append(Issue("error", "BAD_FORMAT", inp.sample,
+                            "archive members must be FASTQ (base qualities are needed for QC)",
+                            "Provide basecalled FASTQ.", [inp.path]))
+        return
+    _identify_ont(inp, [(_ont_header_fields(h), n, q) for h, n, q in recs], issues)
+
+
+class _LineReader:
+    """Minimal readline()/iteration adapter over a line iterator."""
+
+    def __init__(self, lines):
+        self._it = iter(lines)
+
+    def readline(self):
+        return next(self._it, "")
+
+    def __iter__(self):
+        return self._it
 
 
 def _inspect_bam(inp, n_records, issues):
@@ -367,6 +436,7 @@ def _identify_ont(inp, recs, issues):
         "sampled_read_ids": ids,
         "sampled_runids": sorted({f["runid"] for f, _, _ in recs if "runid" in f}),
         "sampled_flow_cells": sorted({f["flow_cell_id"] for f, _, _ in recs if "flow_cell_id" in f}),
+        "sampled_sample_ids": sorted({f["sample_id"] for f, _, _ in recs if f.get("sample_id")}),
         "sampled_n": len(recs),
         "sampled_len_min": min(lens),
         "sampled_len_max": max(lens),

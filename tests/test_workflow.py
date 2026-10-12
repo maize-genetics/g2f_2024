@@ -193,6 +193,46 @@ class WorkflowTest(WorkflowCase):
         self.assertEqual(row["ont_supplied_reads"], "5")
         self.assertEqual(row["ont_retained_reads"], "5")
 
+    def test_ont_tar_streamed_in_place(self):
+        """MinKNOW tar delivery: pass members used (never extracted), fail members excluded."""
+        import gzip
+        import io
+        import random
+        import tarfile
+        d = f"{self.tmp}/data/S2/ont"
+        os.makedirs(d)
+        rng = random.Random(5)
+        names = ont_names(7, seed=11)
+
+        def member(recs):
+            buf = io.BytesIO()
+            with gzip.GzipFile(fileobj=buf, mode="wb") as gz:
+                for n, L in recs:
+                    seq = "".join(rng.choice("ACGT") for _ in range(L))
+                    gz.write(f"@{n}\n{seq}\n+\n{'5' * L}\n".encode())
+            return buf.getvalue()
+
+        with tarfile.open(f"{d}/run1_PAQ00000_abcd1234_fastq.tar", "w") as tf:
+            for name, data in (
+                    ("./fastq_pass/p_pass_x_0.fastq.gz", member(zip(names[:3], [55000, 1000, 60000]))),
+                    ("./fastq_pass/p_pass_x_1.fastq.gz", member(zip(names[3:5], [70000, 2000]))),
+                    ("./fastq_fail/p_fail_x_0.fastq.gz", member(zip(names[5:], [80000, 90000])))):
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                tf.addfile(info, io.BytesIO(data))
+        r = self.smk("--dry-run", "--printshellcmds")
+        self.assertEqual(r.returncode, 0, r.all)
+        self.assertIn(f"results/S2/assembly/{HIFI_ONT}/", r.all)
+        self.assertIn("tar-fastq", r.all)
+        r = self.smk()
+        self.assertEqual(r.returncode, 0, r.stderr[-4000:])
+        row = self.summary_rows()["S2"]
+        self.assertEqual(row["ont_input_type"], "raw")
+        self.assertEqual(row["ont_raw_reads"], "5")                 # pass members only
+        self.assertEqual(row["ont_retained_reads"], "3")            # >= 50 kb
+        extracted = glob.glob(f"{self.tmp}/results/**/p_pass_x_*", recursive=True)
+        self.assertEqual(extracted, [])
+
     # -------------------------------------------------------------- end to end
     def test_end_to_end_and_rerun_behaviour(self):
         r = self.smk()
@@ -298,6 +338,51 @@ class WorkflowTest(WorkflowCase):
         os.rename(f"{d}/S2.asm.ec.bin", f"{self.tmp}/moved_aside.ec.bin")    # human decision
         r = self.smk(target)
         self.assertEqual(r.returncode, 0, r.stderr[-3000:])
+
+    def test_cleanup_switches(self):
+        """cleanup: converted HiFi FASTQ is temporary; hifiasm .bin files are removed only
+        after a successful run (a failed run keeps them for diagnosis)."""
+        self.write_yaml("resources.yaml", {"tmpdir": f"{self.tmp}/tmp", "rules": {"default": {
+            "threads": 1, "mem_mb": 1000}}, "cleanup": {
+            "temp_converted_hifi": True, "remove_hifiasm_bins_after_success": True}})
+        d1 = f"{self.tmp}/results/S1/assembly/{HIFI_ONT}"
+        d2 = f"{self.tmp}/results/S2/assembly/{HIFI_ONLY}"
+        r = self.smk(f"{d2}/S2.asm.bp.p_ctg.gfa", env={"STUB_HIFIASM_FAIL": "1"})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertTrue(os.path.exists(f"{d2}/S2.asm.ec.bin"))          # kept after failure
+        os.remove(f"{d2}/S2.asm.ec.bin")
+        r = self.smk("per_sample")
+        self.assertEqual(r.returncode, 0, r.stderr[-4000:])
+        self.assertFalse(glob.glob(f"{d1}/*.bin"))
+        with open(f"{d1}/S1.asm.removed_bin_files.txt") as fh:
+            self.assertIn("S1.asm.ec.bin", fh.read())
+        self.assertFalse(glob.glob(f"{self.tmp}/results/S1/reads/hifi/converted/*.fastq.gz"))
+        self.assertTrue(glob.glob(f"{self.tmp}/results/*/summary/*.validated.*.json"))
+        self.assertFalse(glob.glob(f"{self.tmp}/results/summary/assembly_summary.*.tsv"))
+        r = self.smk("--dry-run", "per_sample")                        # nothing to redo
+        self.assertEqual(r.returncode, 0, r.all)
+        self.assertFalse(jobs(r.all) & HEAVY, r.all[-3000:])
+
+    def test_concurrent_per_sample_processes(self):
+        """The launcher runs one Snakemake process per sample at the same time in the
+        same directory; their DAGs must not conflict (shared identity stamp made first)."""
+        r = self.smk("identity_stamp")
+        self.assertEqual(r.returncode, 0, r.all)
+        procs = []
+        for s in ("S1", "S2"):
+            cmd = [sys.executable, "-m", "snakemake", "-s", f"{PIPELINE_DIR}/workflow/Snakefile",
+                   "--directory", self.tmp, "--configfile", f"{self.tmp}/config.yaml",
+                   "--cores", "1", "per_sample", "--rerun-triggers", "mtime",
+                   "--config", f"only_samples={s}"]
+            procs.append(subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                          text=True, env=dict(os.environ, TMPDIR=self.tmp)))
+        outs = [p.communicate()[0] for p in procs]
+        for p, out in zip(procs, outs):
+            self.assertEqual(p.returncode, 0, out[-4000:])
+        self.assertEqual(len(glob.glob(f"{self.tmp}/results/*/summary/*.validated.*.json")), 2)
+        r = self.smk()                                                 # project table only
+        self.assertEqual(r.returncode, 0, r.all[-3000:])
+        self.assertEqual(set(self.summary_rows()), {"S1", "S2"})
 
     def test_kmer_flag_warns_by_default_and_review_is_recorded(self):
         r = self.smk(env={"STUB_KMER_HET": "1"})

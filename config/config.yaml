@@ -26,6 +26,9 @@ methods_dir: config/methods
 resources: config/resources/default.yaml
 tools: config/tools/biohpc.yaml
 
+# Optional genotype fingerprinting settings (QC only; never affects assembly).
+fingerprint: config/fingerprint.yaml
+
 # Read-only historical assemblies registered for QC benchmarking.
 external_assemblies: config/external_assemblies.yaml
 

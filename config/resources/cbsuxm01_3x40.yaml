@@ -1,0 +1,43 @@
+# Computational settings for the full-scale run on cbsuxm01 (256 logical CPUs,
+# 2 TB RAM, ~1.2 TB free on /local/workdir as measured 2026-10-12).
+# Used by scripts/run_all_assemblies.sh: three genotypes at a time, one
+# Snakemake process each, 40 threads per process (120 in total).
+# Changing these never changes results (threads/memory/cleanup only).
+# Derivation of the numbers: docs/full_scale_run_plan.md.
+
+tmpdir: ../tmp
+
+rules:
+  default:        {threads: 1,  mem_mb: 4000}
+  checksum:       {threads: 1,  mem_mb: 1000}
+  hifi_bam_to_fastq: {threads: 8, mem_mb: 8000}
+  bam_record_count:  {threads: 4, mem_mb: 4000}
+  read_stats:     {threads: 4,  mem_mb: 8000}
+  ont_filter:     {threads: 4,  mem_mb: 8000}
+  # meryl adapts its batch size to the memory it is given (slower, not
+  # different, with less); 120 GB keeps one meryl + one hifiasm per genotype
+  # from exceeding the per-genotype memory cap together.
+  meryl_count:    {threads: 40, mem_mb: 120000}
+  # PHBW8 legacy (84 Gb HiFi): HiFi-only peak RSS 66 GB, HiFi+ONT 134 GB.
+  # 3AZA1 has ~1.7x more HiFi (est. 140 Gb); 240 GB covers ~1.8x PHBW8.
+  hifiasm_hifi:   {threads: 40, mem_mb: 160000}
+  hifiasm_hifi_ont: {threads: 40, mem_mb: 240000}
+  gfa_to_fasta:   {threads: 1,  mem_mb: 8000}
+  validate_fasta: {threads: 1,  mem_mb: 8000}
+  assembly_stats: {threads: 4,  mem_mb: 8000}
+  busco:          {threads: 32, mem_mb: 64000}
+  merqury:        {threads: 16, mem_mb: 64000}
+  fingerprint_sketch:  {threads: 3, mem_mb: 8000}
+  fingerprint_analyze: {threads: 1, mem_mb: 32000}
+
+# Large, regenerable intermediates (needs approval before the first run;
+# see docs/full_scale_run_plan.md):
+cleanup:
+  # Converted HiFi FASTQ (~1.1 x BAM size) is deleted by Snakemake as soon as
+  # read stats, meryl and hifiasm have used it. It can be regenerated
+  # bit-for-bit from the original BAM.
+  temp_converted_hifi: true
+  # hifiasm ec/ovlp .bin files (~0.45 bytes per HiFi base: 35-65 GB per line)
+  # are removed after a SUCCESSFUL run only (listed first in
+  # <LINE>.asm.removed_bin_files.txt). Failed runs keep them for diagnosis.
+  remove_hifiasm_bins_after_success: true

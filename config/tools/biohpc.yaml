@@ -34,6 +34,11 @@ tools:
   busco:
     cmd: apptainer exec --bind /workdir,/local/workdir /programs/busco-6.1.0/busco.sif busco
     version_cmd: apptainer exec /programs/busco-6.1.0/busco.sif busco --version | head -1
+  # Optional fingerprinting (scripts/g2f_fingerprint.py sketch): BioHPC's
+  # sourmash 4.9.3 install and the Python 3.12 it was built for.
+  fingerprint_python:
+    cmd: env PYTHONPATH=/programs/sourmash-4.9.3/lib/python3.12/site-packages /programs/Python-3.12.7/bin/python3.12
+    version_cmd: env PYTHONPATH=/programs/sourmash-4.9.3/lib/python3.12/site-packages /programs/Python-3.12.7/bin/python3.12 -c "import sourmash; print('sourmash', sourmash.VERSION)"
   md5sum:
     cmd: md5sum
     version_cmd: md5sum --version | head -1

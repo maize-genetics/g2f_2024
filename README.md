@@ -119,17 +119,20 @@ data/
 │   ├── hifi/   EB2_PHBW8.hifi.fasta.gz
 │   └── ont/    PHBW8_ONT_gt50kb.fastq.gz
 ├── PHB47/
-│   ├── hifi/   (reads not yet added)
-│   └── ont/
+│   ├── hifi/   m84109_240913_041905_s3.hifi_reads.bc2037.bam  (+ more SMRT cells)
+│   └── ont/    10474838_4_PAQ81203_63ea86d5_fastq.tar         (+ more runs)
 └── ...
 ```
 
 * **`hifi/` (required):** PacBio HiFi reads, either unaligned `hifi_reads`
   BAM or FASTQ/FASTA (optionally gzipped). Several files (SMRT cells) are
   fine.
-* **`ont/` (optional):** basecalled ONT FASTQ or BAM. If it has reads, the
-  HiFi+ONT method is used; if it is empty or missing, the HiFi-only method
-  is used. POD5/FAST5 must be basecalled first.
+* **`ont/` (optional):** basecalled ONT FASTQ or BAM, or a facility tar
+  archive of MinKNOW FASTQ (`*_fastq.tar` with `fastq_pass/*.fastq.gz`). Tar
+  archives are read in place and never extracted: `fastq_pass` members are
+  streamed in order, and `fastq_fail` members are excluded. If `ont/` has
+  reads, the HiFi+ONT method is used; if it is empty or missing, the
+  HiFi-only method is used. POD5/FAST5 must be basecalled first.
 * **Empty line directories** are skipped, each with a `NO_INPUTS` warning,
   so a missing line is never mistaken for a processed one. Asking for such a
   line by name (below) is an error.
@@ -174,6 +177,10 @@ snakemake --profile profiles/biohpc --cores 64
 
 # QC of the registered historical PHBW8 assemblies only (read-only)
 snakemake --profile profiles/biohpc --cores 32 imported_qc
+
+# Optional genotype fingerprinting: is each ONT read set the genotype it is
+# labelled as? (k-mer QC against all HiFi genotypes; no assembly)
+snakemake fingerprint --profile profiles/biohpc --cores 32
 ```
 
 * `only_samples` combines with any target, for example
@@ -182,6 +189,22 @@ snakemake --profile profiles/biohpc --cores 32 imported_qc
   runs nothing.
 * Re-running the same command resumes where it stopped. Finished work is
   never repeated.
+
+### All lines at full scale (several at a time)
+
+`scripts/run_all_assemblies.sh` runs every line through the workflow, one
+Snakemake process per line, three lines at a time with 40 threads each. The
+next line starts when one finishes, and a failing line does not stop the
+others. It checks tools, disk and memory first, keeps per-line logs, and
+resumes when rerun. Its resource and cleanup settings are in
+`config/resources/cbsuxm01_3x40.yaml`. Read
+[docs/full_scale_run_plan.md](docs/full_scale_run_plan.md) before using it:
+the disk budget depends on its cleanup rules.
+
+```bash
+bash scripts/run_all_assemblies.sh --dry-run        # preflight + per-line dry run
+nohup bash scripts/run_all_assemblies.sh > ../logs/launcher.$(date +%Y%m%d_%H%M%S).out 2>&1 &
+```
 
 ### BioHPC execution profile
 
@@ -307,15 +330,20 @@ that has already been used is refused.
 | [docs/historical_assemblies.md](docs/historical_assemblies.md) | The manual PHBW8 assemblies that preceded the pipeline |
 | [docs/qc_PHBW8_imported_2026-10-11.md](docs/qc_PHBW8_imported_2026-10-11.md) | First pipeline QC of the historical PHBW8 assembly |
 | [docs/audit_2026-10-10.md](docs/audit_2026-10-10.md), [docs/realtools_validation_2026-10-11.md](docs/realtools_validation_2026-10-11.md) | Audit and tool-compatibility records |
+| [docs/fingerprinting.md](docs/fingerprinting.md) | Optional k-mer genotype fingerprinting: method, calibration, outputs |
+| [docs/fingerprinting_results_2026-10-12.md](docs/fingerprinting_results_2026-10-12.md) | Fingerprinting of this project's ONT and HiFi data |
+| [docs/input_audit_2026-10-12.md](docs/input_audit_2026-10-12.md) | Audit of the sequencing files against the manifest |
+| [docs/full_scale_run_plan.md](docs/full_scale_run_plan.md) | Resource audit and launcher for assembling all lines |
 | [docs/planned_extensions.md](docs/planned_extensions.md) | Planned annotation and pangenome modules |
 | [AGENTS.md](AGENTS.md) | Project principles and rules for developers and AI assistants |
 
 ### Repository layout
 
 ```text
-config/     science.yaml, methods/ (immutable), samples.yaml, resources/, tools/, local/ (untracked)
+config/     science.yaml, methods/ (immutable), samples.yaml, fingerprint.yaml, resources/, tools/, local/ (untracked)
 workflow/   Snakefile and rules/*.smk
-scripts/    g2f_tool.py command-line helper and the g2f/ Python package
+scripts/    g2f_tool.py and g2f_fingerprint.py command-line helpers, the g2f/ Python package,
+            run_all_assemblies.sh (full-scale launcher)
 profiles/   Snakemake execution profile for BioHPC
 tests/      unit, fixture, dry-run and stub end-to-end tests
 docs/       documentation and decision records

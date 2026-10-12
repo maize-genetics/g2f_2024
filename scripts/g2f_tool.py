@@ -15,7 +15,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from g2f import discovery, gfa, kmer, provenance, readstats, summary, validate  # noqa: E402
+from g2f import (archive, discovery, gfa, kmer, provenance, readstats, summary,  # noqa: E402
+                 validate)
 
 PIPELINE_DIR = os.path.dirname(HERE)
 
@@ -234,6 +235,18 @@ def cmd_summarize(a):
                                           *(a.busco or [])] if p]})
 
 
+def cmd_tar_fastq(a):
+    """Stream the pass FASTQ members of an ONT tar archive to stdout (raw bytes)."""
+    try:
+        n, nbytes = archive.stream_raw(a.archive, sys.stdout.buffer)
+        sys.stdout.buffer.flush()
+    except BrokenPipeError:
+        sys.exit(1)
+    except archive.ArchiveError as exc:
+        sys.exit(f"tar-fastq: {a.archive}: {exc}")
+    sys.stderr.write(f"tar-fastq: streamed {n} members ({nbytes} bytes) from {a.archive}\n")
+
+
 def cmd_combine(a):
     rows = [r for p in a.inputs for r in summary.read_tsv(p)]
     rows.sort(key=lambda r: (r["sample"], r["method_id"], r.get("busco_lineage", "")))
@@ -366,6 +379,10 @@ def main(argv=None):
         s.add_argument(f"--{k}")
     s.add_argument("--busco", nargs="*")
     s.set_defaults(func=cmd_summarize)
+
+    s = sub.add_parser("tar-fastq", help="stream FASTQ members of an ONT tar (no extraction)")
+    s.add_argument("archive")
+    s.set_defaults(func=cmd_tar_fastq)
 
     s = sub.add_parser("combine")
     s.add_argument("--inputs", nargs="+", required=True)

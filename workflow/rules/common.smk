@@ -192,4 +192,9 @@ def q(path):
     return shlex.quote(str(path))
 
 
+# Optional cleanup of large, regenerable intermediates (computational setting,
+# config/resources/*.yaml `cleanup:`; never changes results). Off by default.
+CLEANUP = CFG["resources"].get("cleanup") or {}
+
+
 shell.prefix(f"export TMPDIR={shlex.quote(CFG['tmpdir'])}; mkdir -p \"$TMPDIR\"; ")

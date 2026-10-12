@@ -25,3 +25,6 @@ rules:
   assembly_stats: {threads: 4,  mem_mb: 8000}
   busco:          {threads: 32, mem_mb: 64000}
   merqury:        {threads: 16, mem_mb: 64000}
+  # Optional fingerprinting: one hashing thread plus read decompression.
+  fingerprint_sketch:  {threads: 3, mem_mb: 8000}
+  fingerprint_analyze: {threads: 1, mem_mb: 32000}

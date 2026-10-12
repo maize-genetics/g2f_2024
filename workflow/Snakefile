@@ -4,6 +4,7 @@
 #   snakemake --profile profiles/biohpc --dry-run --printshellcmds
 #   snakemake --profile profiles/biohpc --cores 64
 #   snakemake --profile profiles/biohpc --cores 32 imported_qc   # historical assemblies
+#   snakemake --profile profiles/biohpc --cores 32 fingerprint   # optional genotype QC
 #
 # Stages: input discovery -> HiFi/ONT read preprocessing and QC -> k-mer
 # screen -> hifiasm (method chosen automatically) -> GFA-to-FASTA with
@@ -32,12 +33,20 @@ include: "rules/assembly.smk"
 include: "rules/imported.smk"
 include: "rules/qc.smk"
 include: "rules/summary.smk"
+include: "rules/fingerprint.smk"
 
 
 rule all:
     input:
         [validated_marker(s, METHOD[s]) for s in SAMPLES],
         PROJECT_SUMMARY if SAMPLES else [],
+
+
+rule per_sample:
+    """Every sample's validated assembly and QC, without the project table.
+    Used by scripts/run_all_assemblies.sh, which runs one sample per process."""
+    input:
+        [validated_marker(s, METHOD[s]) for s in SAMPLES],
 
 
 rule imported_qc:
@@ -51,6 +60,12 @@ rule reads_qc:
     """Preprocess and validate reads and run the k-mer screen; no assembly."""
     input:
         [p for s in SAMPLES for p in reads_qc_targets(s)],
+
+
+rule fingerprint:
+    """Optional genotype fingerprinting of all read sets (QC only; no assembly)."""
+    input:
+        rules.fingerprint_analyze.output,
 
 
 rule inventory_all:

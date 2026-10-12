@@ -21,6 +21,17 @@ The directory name is the canonical sample ID.
 
 **ONT formats**
 * Basecalled `*.fastq[.gz]` or `*.bam`.
+* `*.tar`: an uncompressed archive of MinKNOW FASTQ, as delivered by
+  sequencing facilities (`./fastq_pass/<flowcell>_pass_<run>_<n>.fastq.gz`).
+  The archive is read in place and never extracted (`scripts/g2f/archive.py`):
+  * FASTQ members are streamed in natural order (batch 0, 1, ..., 10, ...);
+  * members under a `*fail*` directory (`fastq_fail/`) are excluded;
+  * any non-FASTQ member (summaries, POD5, BAM, ...), or a mix of gzipped and
+    plain members, stops the workflow (`BAD_ARCHIVE_CONTENT`);
+  * truncation is detected while streaming.
+  Discovery reads the archive's member headers and the first reads of the
+  first member (run ID, flow cell, `sample_id`, basecall model). Tar archives
+  are accepted only in `ont/`.
 * POD5/FAST5 files are rejected with a "basecalling required" message.
 
 **Multiple files**

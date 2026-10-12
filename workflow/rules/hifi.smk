@@ -46,7 +46,10 @@ rule hifi_bam_to_fastq:
         bam=lambda wc: get_input(wc.sample, "hifi", wc.iid).path,
         inventory=ancient(f"{RES}/{{sample}}/inputs/inventory.json"),
     output:
-        f"{RES}/{{sample}}/reads/hifi/converted/{{iid}}.fastq.gz",
+        # temp: deleted by Snakemake once read stats, meryl and hifiasm have used
+        # it (cleanup.temp_converted_hifi); regenerated from the BAM if needed.
+        (temp if CLEANUP.get("temp_converted_hifi") else (lambda p: p))(
+            f"{RES}/{{sample}}/reads/hifi/converted/{{iid}}.fastq.gz"),
     log:
         prov=f"{RES}/{{sample}}/provenance/hifi_bam_to_fastq/{{iid}}.json",
     threads: R("hifi_bam_to_fastq")["threads"]

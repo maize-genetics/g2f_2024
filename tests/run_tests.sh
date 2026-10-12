@@ -8,5 +8,5 @@ cd "$(dirname "$0")"
 if command -v module >/dev/null 2>&1; then module load python/3.12.7 >/dev/null 2>&1 || true; fi
 export TMPDIR="${TMPDIR:-/workdir/$USER/tmp}"
 mkdir -p "$TMPDIR"
-if [[ $# -eq 0 ]]; then set -- test_discovery test_units test_workflow test_realtools; fi
+if [[ $# -eq 0 ]]; then set -- test_discovery test_units test_workflow test_fingerprint test_realtools; fi
 python3 -m unittest -v "$@"
