@@ -67,7 +67,11 @@ Categories: **needed by an active job** (raw files during preprocessing;
 prepared files during hifiasm and meryl; `.bin` during hifiasm), **needed for
 reproducibility** (priorities 1 and 2), **disposable** (priority 3).
 
-**Prepared HiFi FASTQ retention** (`--retain-hifi auto`, the default).
+**Prepared HiFi FASTQ retention.** The launcher default is now
+`--retain-hifi keep` (nothing deleted). This run was launched on
+2026-10-12 with `auto`, the default at the time, and FBLL's FASTQ was made
+temporary; its BAMs are kept and the FASTQ can be regenerated from them.
+In `auto` mode:
 Before each genotype starts, the disk gate keeps its FASTQ only if, after
 reserving that genotype's full peak, the remaining space still covers every
 not-yet-started genotype's final footprint and the largest concurrent
@@ -75,7 +79,7 @@ transient needs. Otherwise the FASTQ is made temporary: Snakemake deletes it
 once read QC, the gate, meryl and hifiasm have used it. The decision is
 recorded per genotype (`status.tsv`, `gate.jsonl`). Deleting local raw
 copies frees space, so later genotypes then keep theirs.
-`--retain-hifi keep|temp` forces one behaviour.
+`--retain-hifi temp` always deletes it after use.
 
 ## Raw copies: when are they safe to delete?
 
@@ -86,8 +90,10 @@ A local raw BAM or tar is **ELIGIBLE** only if all of these hold:
 
 1. the genotype's prepared inputs passed the gate (all runs accounted for);
 2. its prepared file is **still present and unchanged** since verification
-   (same size and mtime). So a genotype whose HiFi FASTQ was not retained
-   keeps its BAMs: they are then the only local source;
+   (same size and mtime), **and not temporary**. A genotype whose latest
+   launcher start decision (`gate.jsonl`) made its HiFi FASTQ temporary
+   keeps its BAMs even while hifiasm is still reading the FASTQ: they will
+   be the only local source;
 3. its raw MD5 was recorded;
 4. it is in the manifest, **and** `scripts/check_remote_copies.sh` confirmed
    the original exists on the source node at the manifest size. That check

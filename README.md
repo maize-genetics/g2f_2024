@@ -212,6 +212,18 @@ which local raw BAM/tar copies are safe to delete by hand
 (`python3 scripts/g2f_tool.py raw-release`; the pipeline never deletes raw
 data).
 
+**Nothing is deleted unless you opt in.** By default the workflow and the
+launcher keep every read file and intermediate. Two deletions can be
+switched on for disk space:
+
+* `--retain-hifi auto|temp` (launcher) or `retain_prepared_hifi: false`
+  (resources file): the converted HiFi FASTQ is deleted after hifiasm. The
+  raw BAMs are then the only local copy, and `raw-release` never marks
+  them eligible.
+* `remove_hifiasm_bins_after_success: true` (resources file): hifiasm
+  `.bin` files are deleted after a verified successful run. This is on in
+  `cbsuxm01_3x40.yaml`, as approved for this project.
+
 ### BioHPC execution profile
 
 `profiles/biohpc/config.yaml` runs jobs directly on the server you are

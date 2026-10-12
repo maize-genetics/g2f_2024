@@ -199,9 +199,11 @@ def load_remote_table(path):
         return {r["source_path"]: r for r in csv.DictReader(fh, delimiter="\t")}
 
 
-def release_report(verified, remote):
+def release_report(verified, remote, hifi_temporary=False):
     """Per raw file: eligible for manual deletion, with reasons. `verified` is
-    the output of verify_prepared (or None if not yet verified)."""
+    the output of verify_prepared (or None if not yet verified). With
+    `hifi_temporary`, the converted HiFi FASTQ is deleted after hifiasm in the
+    latest run, so the BAMs stay the local source even while the FASTQ exists."""
     out = []
     for r in (verified or {}).get("runs", []):
         if r["raw_format"] not in RAW_FORMATS:
@@ -217,6 +219,9 @@ def release_report(verified, remote):
             p = r.get("prepared_path")
             if not p or p == r["raw_path"]:
                 row["reasons"].append("no separate prepared file")
+            elif r["tech"] == "hifi" and hifi_temporary:
+                row["reasons"].append("prepared HiFi FASTQ is temporary in the latest run "
+                                      "(deleted after hifiasm; raw copy is the local source)")
             elif not os.path.exists(p):
                 row["reasons"].append("prepared file not retained (raw copy is the local source)")
             else:

@@ -8,6 +8,7 @@ people: it shows which inputs would be used and why, without processing reads.
   python3 scripts/g2f_tool.py discover --json     # machine-readable inventory
 """
 import argparse
+import glob
 import json
 import os
 import sys
@@ -278,6 +279,28 @@ def cmd_verify_prepared(a):
     _emit(res, a.out, f"prepared inputs of {a.sample} failed verification")
 
 
+def _hifi_retention(sample, logs_dir, cfg):
+    """(retained, source) for a sample's converted HiFi FASTQ: the latest launcher
+    start decision (logs/assembly_*/gate.jsonl), else the resources default."""
+    latest = None
+    for d in sorted(glob.glob(os.path.join(logs_dir, "assembly_*"))):
+        g = os.path.join(d, "gate.jsonl")
+        if d.endswith(".dryrun") or not os.path.isfile(g):
+            continue
+        with open(g) as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if rec.get("sample") == sample and rec.get("start"):
+                    latest = (bool(rec.get("retain_prepared_hifi", True)), g)
+    if latest:
+        return latest
+    v = ((cfg.get("resources") or {}).get("cleanup") or {}).get("retain_prepared_hifi", True)
+    return str(v).strip().lower() in ("1", "true", "yes", "keep"), "resources cleanup default"
+
+
 def cmd_raw_release(a):
     """Report which local raw copies are eligible for MANUAL deletion. Deletes nothing."""
     import yaml
@@ -286,6 +309,7 @@ def cmd_raw_release(a):
         cfg = load_config(yaml.safe_load(fh) or {}, PIPELINE_DIR)
     res_dir = cfg["results_dir"]
     remote = prepared.load_remote_table(cfg.get("remote_copy_table"))
+    logs_dir = a.logs_dir or os.path.join(os.path.dirname(os.path.abspath(res_dir)), "logs")
     rows = []
     for sample in sorted(os.listdir(res_dir)) if os.path.isdir(res_dir) else []:
         vpath = os.path.join(res_dir, sample, "inputs", "prepared_inputs.verified.json")
@@ -295,9 +319,11 @@ def cmd_raw_release(a):
             continue
         with open(vpath) as fh:
             verified = json.load(fh)
-        files = prepared.release_report(verified, remote)
+        retained, rsrc = _hifi_retention(sample, logs_dir, cfg)
+        files = prepared.release_report(verified, remote, hifi_temporary=not retained)
         provenance.write_json(os.path.join(res_dir, sample, "inputs", "raw_release.json"),
                               {"sample": sample, "verified": vpath,
+                               "hifi_fastq_retained": retained, "hifi_retention_source": rsrc,
                                "remote_copy_table": cfg.get("remote_copy_table"),
                                "generated_by": "g2f_tool.py raw-release", "files": files})
         for f in files:
@@ -502,7 +528,9 @@ def main(argv=None):
     s = sub.add_parser("raw-release", help="report local raw copies eligible for manual deletion")
     s.add_argument("--config", default=os.path.join(PIPELINE_DIR, "config", "config.yaml"))
     s.add_argument("--only", nargs="*")
+    s.add_argument("--logs-dir", help="launcher logs (default: <results>/../logs)")
     s.set_defaults(func=cmd_raw_release)
+
 
     s = sub.add_parser("disk-estimates", help="launcher: disk estimates from discover --json")
     s.add_argument("--out", required=True)
@@ -515,7 +543,7 @@ def main(argv=None):
     s.add_argument("--results", required=True)
     s.add_argument("--reserve-gb", type=float, default=150)
     s.add_argument("--jobs", type=int, default=3)
-    s.add_argument("--mode", choices=["auto", "keep", "temp"], default="auto")
+    s.add_argument("--mode", choices=["auto", "keep", "temp"], default="keep")
     s.set_defaults(func=cmd_disk_gate)
 
     s = sub.add_parser("combine")

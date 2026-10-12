@@ -255,11 +255,17 @@ results labelled as valid, the workflow does the following.
 * **Priorities:** (1) assemblies, QC, logs, provenance; (2) prepared hifiasm
   inputs (converted HiFi FASTQ, filtered ONT FASTQ); (3) regenerable
   intermediates.
-* **hifiasm `.bin` files** are removed after hifiasm exits 0 and its GFA
-  outputs are verified; the removal is logged. Failed runs keep them.
-* **Prepared HiFi FASTQ:** kept, unless the full-scale launcher's disk gate
-  projects that keeping it would endanger later genotypes. Then it is
-  deleted after use (`retain_prepared_hifi=false`, recorded per genotype).
+* **Deletion is opt-in** (decided 2026-10-12): by default the pipeline
+  deletes no reads or intermediates, so that a user without another copy
+  cannot lose data. The two options below exist for disk space.
+* **hifiasm `.bin` files** (opt-in; on in `cbsuxm01_3x40.yaml`) are removed
+  after hifiasm exits 0 and its GFA outputs are verified; the removal is
+  logged. Failed runs keep them.
+* **Prepared HiFi FASTQ:** kept by default. With `--retain-hifi auto` the
+  launcher's disk gate deletes it after use when keeping it would endanger
+  later genotypes; `temp` always deletes it (`retain_prepared_hifi=false`,
+  recorded per genotype). The 2026-10-12 full run used `auto`, then the
+  default.
 * **Local raw BAM/tar copies** are never deleted by the pipeline. Eligibility
   for manual deletion requires:
   * verified prepared inputs;

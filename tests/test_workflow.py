@@ -340,6 +340,20 @@ class WorkflowTest(WorkflowCase):
         r = self.smk(target)
         self.assertEqual(r.returncode, 0, r.stderr[-3000:])
 
+    def test_default_deletes_nothing(self):
+        """With the shipped default cleanup settings no reads or intermediates are deleted:
+        converted HiFi FASTQ, filtered ONT FASTQ and hifiasm .bin files all remain."""
+        with open(f"{PIPELINE_DIR}/config/resources/default.yaml") as fh:
+            cleanup = yaml.safe_load(fh)["cleanup"]
+        self.write_yaml("resources.yaml", {"tmpdir": f"{self.tmp}/tmp", "rules": {"default": {
+            "threads": 1, "mem_mb": 1000}}, "cleanup": cleanup})
+        r = self.smk("per_sample")
+        self.assertEqual(r.returncode, 0, r.stderr[-4000:])
+        self.assertTrue(glob.glob(f"{self.tmp}/results/S1/assembly/{HIFI_ONT}/*.bin"))
+        self.assertTrue(glob.glob(f"{self.tmp}/results/S1/reads/hifi/converted/*.fastq.gz"))
+        self.assertTrue(glob.glob(f"{self.tmp}/results/S1/reads/ont/ul50000/*.fastq.gz"))
+        self.assertNotIn("Removing temporary output", r.all)
+
     def test_cleanup_switches(self):
         """retain_prepared_hifi=false makes the converted HiFi FASTQ temporary; hifiasm .bin
         files are removed only after a successful run (a failed run keeps them)."""
@@ -387,7 +401,7 @@ class WorkflowTest(WorkflowCase):
 
     def test_raw_release_lifecycle(self):
         """Prepared inputs verified before hifiasm; a local raw BAM becomes eligible for manual
-        deletion only with a retained prepared FASTQ and a confirmed remote copy; after it is
+        deletion only with a retained (not temporary) prepared FASTQ and a confirmed remote copy; after it is
         deleted the workflow resumes with nothing to redo; deleting anything else stops it."""
         bam = f"{self.tmp}/data/S1/hifi/{M1}.hifi_reads.bc2027.bam"
         man, remote = f"{self.tmp}/manifest.tsv", f"{self.tmp}/remote.tsv"
@@ -417,6 +431,16 @@ class WorkflowTest(WorkflowCase):
                      f"{src}\tyes\t{os.path.getsize(bam)}\t0\t2026-10-12T00:00:00\n")
         rel = release()
         self.assertTrue(rel[os.path.basename(bam)]["eligible"], rel)
+        gate = f"{self.tmp}/logs/assembly_20260101_000000/gate.jsonl"       # launcher: FASTQ temporary
+        os.makedirs(os.path.dirname(gate))
+        with open(gate, "w") as fh:
+            fh.write(json.dumps({"sample": "S1", "start": True, "retain_prepared_hifi": False}) + "\n")
+        rel = release()
+        self.assertFalse(rel[os.path.basename(bam)]["eligible"])            # BAM stays the source
+        self.assertIn("temporary", " ".join(rel[os.path.basename(bam)]["reasons"]))
+        with open(gate, "a") as fh:                                         # later run keeps it
+            fh.write(json.dumps({"sample": "S1", "start": True, "retain_prepared_hifi": True}) + "\n")
+        self.assertTrue(release()[os.path.basename(bam)]["eligible"])
         os.remove(bam)                                                      # the person deletes it
         r = self.smk("--dry-run")
         self.assertEqual(r.returncode, 0, r.all[-3000:])

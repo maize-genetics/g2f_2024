@@ -38,8 +38,9 @@ cleanup:
   #   true:  keep (default when Snakemake is run directly).
   #   false: Snakemake deletes it once read QC, the prepared-input check,
   #          meryl and hifiasm have used it (regenerable from the BAM).
-  # scripts/run_all_assemblies.sh decides per genotype from the disk
-  # projection (--retain-hifi auto) and passes --config retain_prepared_hifi=.
+  # scripts/run_all_assemblies.sh keeps it by default (--retain-hifi keep);
+  # with --retain-hifi auto the disk gate decides per genotype, and with
+  # temp it is always deleted. Either way it passes --config retain_prepared_hifi=.
   # Filtered ONT (>= 50 kb) FASTQs are small and always kept.
   retain_prepared_hifi: true
   # hifiasm ec/ovlp/uidx .bin files (~0.45 bytes per HiFi base + ~13 GB:

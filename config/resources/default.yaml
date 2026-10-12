@@ -28,3 +28,10 @@ rules:
   # Optional fingerprinting: one hashing thread plus read decompression.
   fingerprint_sketch:  {threads: 3, mem_mb: 8000}
   fingerprint_analyze: {threads: 1, mem_mb: 32000}
+
+# Deletion is opt-in: by default the pipeline deletes no reads and no
+# intermediates (raw BAM/tar inputs are never deleted). See
+# config/resources/cbsuxm01_3x40.yaml for the opt-in settings.
+cleanup:
+  retain_prepared_hifi: true                 # false: delete converted HiFi FASTQ after use
+  remove_hifiasm_bins_after_success: false   # true: delete .bin files after verified success

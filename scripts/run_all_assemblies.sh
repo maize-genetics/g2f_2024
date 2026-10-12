@@ -21,15 +21,17 @@
 #   --threads T         threads per genotype (default 40)
 #   --mem-gb G          memory budget per genotype for Snakemake scheduling (default 300)
 #   --reserve-gb R      free disk always kept in reserve by the disk gate (default 150)
-#   --retain-hifi M     prepared HiFi FASTQ retention: auto (default; decided per
-#                       genotype by the disk gate), keep, or temp (delete after use)
+#   --retain-hifi M     prepared HiFi FASTQ retention: keep (default; nothing is
+#                       deleted), auto (the disk gate may make it temporary per
+#                       genotype), or temp (always delete after use). With auto or
+#                       temp, keep the raw BAMs: they become the only local copy.
 #   --max-wait-h H      a genotype waiting this long for disk space fails (default 48)
 #   --samples "A B"     only these genotypes (default: all discovered), in this order
 #   --resources FILE    resources file (default config/resources/cbsuxm01_3x40.yaml)
 #   --dry-run           preflight + `snakemake -n` per genotype; executes nothing
 set -euo pipefail
 
-JOBS=3; THREADS=40; MEM_GB=300; RESERVE_GB=150; RETAIN_MODE=auto; MAX_WAIT_H=48
+JOBS=3; THREADS=40; MEM_GB=300; RESERVE_GB=150; RETAIN_MODE=keep; MAX_WAIT_H=48
 SAMPLES=""; DRY=0
 RESOURCES=config/resources/cbsuxm01_3x40.yaml
 while [[ $# -gt 0 ]]; do
