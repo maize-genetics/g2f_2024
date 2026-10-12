@@ -150,7 +150,7 @@ touched. Both switches are tested (`test_cleanup_switches`).
      ```
    * or acknowledge it (`acknowledge: {<file>: {no_qualifying_reads: <reason>}}`)
      so it is kept in the yield accounting.
-2. **Fingerprinting results** (`docs/fingerprinting_results_2026-10-12.md`):
+2. **Fingerprinting results** (`docs/fingerprinting_results_2026-10-12.md`): no ONT run is mismatched, but GEMS-0061 and GEMS-0113 are ambiguous (ONT and HiFi DNA from non-identical, partly heterozygous plants); decide their method;
    review any ONT run that is not `supported` before assembly. HiFi+ONT
    assembly uses every ONT input of a genotype.
 3. **Approve the cleanup switches** (above), or run with
