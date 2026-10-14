@@ -53,7 +53,8 @@ Never watch long-running jobs through repeated tool calls.
 Do not waste context polling or tailing logs.
 
 ## Reproducibility
-- Use Git for all scripts, configurations, and documentation.
+- Use Git for reusable code, portable configuration and user
+  documentation only (see Repository hygiene).
 - Keep sequencing data and large outputs outside Git.
 - Use one sample manifest as the authoritative input registry.
 - Separate scientific parameters from resource settings.
@@ -71,16 +72,68 @@ Do not waste context polling or tailing logs.
 - Use Bash for simple wrappers and Python for structured logic.
 - Introduce a workflow manager when it provides clear value.
 - Include input validation and useful error messages.
-- Write small tests for new scripts.
+- Write small tests for new scripts, using synthetic data only.
 - Document scientific decisions and their justification.
 - Avoid refactoring validated analyses unnecessarily.
 
 ## Project organization
-- config/: samples, parameters, and environment settings
+- config/: portable parameters, defaults and *.example.yaml
+  templates; project-specific files are untracked
+- config/local/: untracked machine and project settings
 - scripts/: version-controlled executable utilities
 - workflow/: reproducible workflow definitions
-- tests/: lightweight testing
-- docs/: scientific decisions, benchmark data, provenance
+- profiles/: optional execution profiles (e.g. BioHPC)
+- tests/: lightweight tests on synthetic data
+- docs/: user documentation for the reusable pipeline
+- ../project_records/ (outside the repository, never in Git):
+  scientific decisions, run plans, audits, incidents, QC
+  reports, fingerprinting results, provenance notes
+
+## Repository hygiene (Git policy)
+GitHub distributes reusable software. It does not document
+research operations or Cornell infrastructure.
+
+Git may contain ONLY:
+- Pipeline source code and workflow definitions.
+- Portable configuration and *.example templates.
+- Container definitions and software environments.
+- Synthetic tests and fixtures (invented values and paths).
+- README, installation and user documentation.
+- Agent instructions (AGENTS.md, CLAUDE.md).
+- Optional execution profiles without private details.
+
+Git must NOT contain:
+- Execution logs, diagnostic dumps, process histories.
+- Incident or reboot reports, SSH troubleshooting, run
+  plans, backup reviews, or other operational records.
+- Internal IP addresses, unnecessary hostnames, personal
+  usernames or paths, backup or storage architecture.
+- Scientific results: assembly or QC reports, BUSCO or
+  fingerprinting outputs, metrics intended for publication.
+- Reads, assemblies, intermediates, or real sample
+  metadata (samples.yaml, manifests, run/flow-cell IDs).
+- Private AI notes or session transcripts.
+- Credentials, tokens, secrets, or personal information.
+
+Rules for agents:
+- Write operational and scientific records to
+  ../project_records/, never to docs/ or other tracked paths.
+- Use generic names (SAMPLE_A, /path/to/...) in examples,
+  tests and documentation; never real sample IDs, hosts,
+  usernames or results.
+- Code must not require personal paths or Cornell/BioHPC
+  infrastructure; BioHPC settings stay optional
+  (config/tools/biohpc.yaml, profiles/biohpc).
+- Public software installation paths (e.g. /programs/...)
+  are acceptable in optional BioHPC files only.
+- Before every commit, review the staged diff for the items
+  above. Before every push, scan every object in
+  `git rev-list --objects origin/main..HEAD`, including
+  commit messages; earlier versions in unpushed history
+  count too. Commit author email: a GitHub noreply address.
+- Never move private material out of Git by deleting it:
+  copy it to ../project_records/, verify checksums, then
+  `git rm --cached`.
 
 ## Manuscript requirements
 Every reported numerical result must be traceable to:

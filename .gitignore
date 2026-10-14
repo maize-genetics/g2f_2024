@@ -66,3 +66,26 @@ id_ed25519*
 .DS_Store
 *.swp
 *~
+
+# Per-project configuration (tracked templates: *.example.yaml)
+config/samples.yaml
+config/external_assemblies.yaml
+
+# Private research and operational records never belong in Git
+# (keep them in ../project_records/; see AGENTS.md, Repository hygiene)
+project_records/
+private/
+docs/private/
+docs/**/*.tsv
+docs/**/*.json
+
+# Execution logs and job output (synthetic test fixtures excepted)
+*.log
+!tests/fixtures/*synthetic*.log
+*.out
+.nextflow*
+slurm-*.out
+
+# AI session data
+.claude/projects/
+*.jsonl

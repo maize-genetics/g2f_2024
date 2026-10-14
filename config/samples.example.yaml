@@ -1,0 +1,38 @@
+# Example per-project sample metadata. Copy to config/samples.yaml (untracked)
+# and edit; the file is optional. Sample IDs are the names of the directories
+# in data/<SAMPLE>/ (letters, digits, '_', '.', '-'; must start with a letter
+# or digit). All names and values below are invented.
+#
+# Samples are discovered from data/<SAMPLE>/ directories and from external
+# input references in config/local/local.yaml. An entry here is optional for
+# discovery, but it is where human decisions about a sample are recorded:
+#
+#   aliases:            historical or alternative names (never used as IDs)
+#   metadata:           free-form descriptive fields; use null for unknown
+#   exclude_inputs:     basenames of discovered files that must NOT be used,
+#                       each with a reason (e.g. derived copy of a BAM)
+#   acknowledge:        basenames of files with flagged properties that a
+#                       human has reviewed (e.g. pre-filtered ONT reads)
+#   kmer_review:        recorded review of a flagged k-mer heterozygosity
+#                       screen (status: accepted, reason, reviewer, date)
+#   method_override:    use a specific method_id instead of the automatic
+#                       policy; requires override_reason
+#
+# Unknown values are null. Never fill in values that have not been verified.
+samples:
+  SAMPLE_A:
+    aliases: [SampleA_old_name]
+    metadata:
+      germplasm_source: null
+    exclude_inputs: {}
+    acknowledge:
+      SAMPLE_A_ONT_gt50kb.fastq.gz:
+        prefiltered_ont: >
+          Example: ONT reads that were already length-filtered before
+          delivery; raw basecalled reads are not available. Used as-is after
+          verifying every read meets the method's length threshold.
+
+  SAMPLE_B:
+    exclude_inputs:
+      SAMPLE_B_run2_aborted.fastq.gz: >
+        Example: aborted ONT run with no reads above the length threshold.

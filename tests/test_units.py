@@ -41,14 +41,18 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(cfg["science"]["qc"]["busco"]["lineages"]["poales_odb12.2"]
                          ["datasets_version"], "odb12.2")
         self.assertFalse(cfg["science"]["kmer"]["screen"]["block_assembly_on_flag"])
-        ext = cfg["external_assemblies"]["PHBW8"]
-        self.assertEqual(set(ext), {"legacy_hifi_ont_l0", "legacy_hifi_l0", "legacy_hifi_default"})
-        self.assertTrue(ext["legacy_hifi_ont_l0"]["p_ctg_fa"].endswith(
-            "hifiasm_v0.25.0/ont_hifi/PHBW8_HiFi_Nano_l0.bp.p_ctg.fa"))
+        ext = cfg["external_assemblies"]["SAMPLE_A"]
+        self.assertEqual(set(ext), {"previous_hifi_l0"})
+        self.assertTrue(ext["previous_hifi_l0"]["p_ctg_fa"].endswith(
+            "previous_assemblies/SAMPLE_A/SAMPLE_A.asm.bp.p_ctg.fa"))
         self.assertIn("prefiltered_ont",
-                      cfg["samples"]["PHBW8"]["acknowledge"]["PHBW8_ONT_gt50kb.fastq.gz"])
-        self.assertIn("PHBW8", cfg["samples"])
-        self.assertEqual(cfg["samples"]["PHBW8"]["aliases"], ["EB2_PHBW8"])
+                      cfg["samples"]["SAMPLE_A"]["acknowledge"]["SAMPLE_A_ONT_gt50kb.fastq.gz"])
+        self.assertEqual(cfg["samples"]["SAMPLE_A"]["aliases"], ["SampleA_old_name"])
+
+    def test_missing_samples_file_is_optional(self):
+        cfg = load_config(dict(BASE_TOP, samples=f"{self.tmp}/none.yaml", data_dir=f"{self.tmp}/d",
+                               results_dir=f"{self.tmp}/r", local=f"{self.tmp}/none.yaml"), PIPELINE_DIR)
+        self.assertEqual(cfg["samples"], {})
 
     def test_results_inside_legacy_rejected(self):
         top = dict(BASE_TOP, data_dir=f"{self.tmp}/data", results_dir=f"{self.tmp}/legacy/results",
@@ -80,7 +84,7 @@ class ConfigTest(unittest.TestCase):
 
 class ReadStatsTest(unittest.TestCase):
     def test_hifi_stats_census_and_n50(self):
-        movie = "m84109_240806_024441_s4"
+        movie = "m84000_240101_000001_s1"
         lines = [f"{n}\t{l}\t{q}\n" for n, l, q in
                  zip(hifi_names(movie, 4), [10, 20, 30, 40], [30, 30, 20, 10])]
         s = readstats.aggregate(lines, "hifi", True, genome_size=10)
@@ -221,18 +225,18 @@ class ValidateTest(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertTrue(any("different read-statistics code" in e for e in r["errors"]))
 
-    def test_busco_real_fixture(self):
-        r = validate.validate_busco(os.path.join(FIX, "busco_short_summary_PHBW8_l0_liliopsida_odb10.json"),
+    def test_busco_fixture(self):
+        r = validate.validate_busco(os.path.join(FIX, "busco_short_summary_synthetic_liliopsida_odb10.json"),
                                     None)
         self.assertTrue(r["ok"], r["errors"])
         self.assertEqual(r["lineage"], "liliopsida_odb10")
-        self.assertEqual((r["complete_pct"], r["single_pct"], r["duplicated_pct"]), (99.1, 81.9, 17.3))
+        self.assertEqual((r["complete_pct"], r["single_pct"], r["duplicated_pct"]), (95.8, 80.3, 15.5))
         self.assertEqual(r["n_markers"], 3236)
-        self.assertEqual(r["internal_stop_codon_count"], 127)
+        self.assertEqual(r["internal_stop_codon_count"], 96)
         self.assertEqual(r["gene_predictor"], "miniprot")
 
     def test_busco_pinned_dataset_enforced(self):
-        fx = os.path.join(FIX, "busco_short_summary_PHBW8_l0_liliopsida_odb10.json")
+        fx = os.path.join(FIX, "busco_short_summary_synthetic_liliopsida_odb10.json")
         cfg = write_bytes(f"{self.tmp}/dataset.cfg", b"name=liliopsida_odb10\ncreation_date=2024-01-08\n"
                                                     b"number_of_BUSCOs=3236\nOrthoDB_version=10.1\n")
         ok = validate.validate_busco(fx, cfg, "6.1.0", {"name": "liliopsida_odb10",
@@ -257,7 +261,7 @@ class ValidateTest(unittest.TestCase):
         self.assertTrue(r["empty"])
 
     def test_busco_inconsistent_counts_fail(self):
-        with open(os.path.join(FIX, "busco_short_summary_PHBW8_l0_liliopsida_odb10.json")) as fh:
+        with open(os.path.join(FIX, "busco_short_summary_synthetic_liliopsida_odb10.json")) as fh:
             d = json.load(fh)
         d["results"]["Missing BUSCOs"] += 5
         r = validate.validate_busco(jdump(f"{self.tmp}/b.json", d), None)
@@ -272,23 +276,23 @@ class ValidateTest(unittest.TestCase):
         bad = write_bytes(f"{self.tmp}/bad.qv", b"garbage\n")
         self.assertFalse(validate.validate_merqury(bad, cp, "S.m.p_ctg")["ok"])
 
-    def test_seqkit_stats_real_fixture(self):
-        st = validate.parse_seqkit_stats(os.path.join(FIX, "seqkit_stats_PHBW8_HiFi_Nano_l0.txt"))
-        self.assertEqual(st["n_contigs"], 490)
-        self.assertEqual(st["total_bp"], 2266382187)
-        self.assertEqual(st["n50"], 121136088)
-        self.assertEqual(st["l50"], 6)
-        self.assertEqual(st["gc_pct"], 46.71)
+    def test_seqkit_stats_fixture(self):
+        st = validate.parse_seqkit_stats(os.path.join(FIX, "seqkit_stats_synthetic.txt"))
+        self.assertEqual(st["n_contigs"], 312)
+        self.assertEqual(st["total_bp"], 1234567890)
+        self.assertEqual(st["n50"], 45678901)
+        self.assertEqual(st["l50"], 9)
+        self.assertEqual(st["gc_pct"], 44.12)
         self.assertEqual(st["gap_bp"], 0)
 
-    def test_hifiasm_log_real_fixture(self):
-        h = validate.parse_hifiasm_log(os.path.join(FIX, "hifiasm_PHBW8_HiFi_Nano_l0.stderr.excerpt.log"))
+    def test_hifiasm_log_fixture(self):
+        h = validate.parse_hifiasm_log(os.path.join(FIX, "hifiasm_synthetic.stderr.excerpt.log"))
         self.assertEqual(h["version"], "0.25.0-r726")
         self.assertIn("--ul", h["command"])
-        self.assertEqual(h["peak_rss_gb"], 133.736)
-        self.assertEqual(h["ul_passed_reads"], 12416)
-        self.assertEqual(h["peaks"][0], {"stage": "ha_ft_gen", "peak_hom": 37, "peak_het": -1})
-        self.assertEqual(h["peaks"][1], {"stage": "ha_pt_gen", "peak_hom": 72, "peak_het": 36})
+        self.assertEqual(h["peak_rss_gb"], 98.765)
+        self.assertEqual(h["ul_passed_reads"], 9876)
+        self.assertEqual(h["peaks"][0], {"stage": "ha_ft_gen", "peak_hom": 25, "peak_het": -1})
+        self.assertEqual(h["peaks"][1], {"stage": "ha_pt_gen", "peak_hom": 48, "peak_het": 24})
 
     def test_gfa_fasta_consistency(self):
         g = write_bytes(f"{self.tmp}/a.gfa", b"H\tVN:Z:1.0\nS\tc1\tACGT\tLN:i:4\nS\tc2\tGGNN\tLN:i:4\n")

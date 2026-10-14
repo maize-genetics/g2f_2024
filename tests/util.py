@@ -65,7 +65,7 @@ def write_bam(path, names, lens, readtype="CCS", platform="PACBIO", movie="m8410
     return path
 
 
-def ont_names(n, runid="a6c999f5ed670f6a87f642dcc2be2382abd9c375", seed=1):
+def ont_names(n, runid="0123456789abcdef0123456789abcdef01234567", seed=1):
     rng = random.Random(seed)
     return [f"{uuid.UUID(int=rng.getrandbits(128))} runid={runid} read={i} ch=1 "
             f"flow_cell_id=PAQ00000 basecall_model_version_id=dna_r10.4.1_e8.2_400bps_hac@v4.2.0"
@@ -73,7 +73,8 @@ def ont_names(n, runid="a6c999f5ed670f6a87f642dcc2be2382abd9c375", seed=1):
 
 
 BASE_TOP = {
-    "samples": "config/samples.yaml",
+    "samples": "config/samples.example.yaml",
+    "external_assemblies": "config/external_assemblies.example.yaml",
     "science": "config/science.yaml",
     "methods_dir": "config/methods",
     "resources": "config/resources/default.yaml",

@@ -1,0 +1,2 @@
+file                 format  type  num_seqs      sum_len  min_len      avg_len     max_len      Q1        Q2       Q3  sum_gap         N50  N50_num  Q20(%)  Q30(%)  AvgQual  GC(%)  sum_n
+SAMPLE.bp.p_ctg.fa   FASTA   DNA        312  1,234,567,890   15,001  3,956,948.4  98,765,432  50,123  71,234.5  120,456        0  45,678,901        9       0       0        0  44.12      0

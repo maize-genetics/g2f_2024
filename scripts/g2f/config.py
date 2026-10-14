@@ -76,8 +76,9 @@ def load_config(config, pipeline_dir):
         "legacy_dirs": [_resolve(base, p) for p in config.get("legacy_dirs", [])],
         "only_samples": _as_list(config.get("only_samples")),
     }
-    cfg["samples"] = (_load_yaml(_resolve(base, config.get("samples", "config/samples.yaml")))
-                      .get("samples") or {})
+    # Per-project sample metadata is optional (untracked; see config/samples.example.yaml).
+    cfg["samples"] = (_load_yaml(_resolve(base, config.get("samples", "config/samples.yaml")),
+                                 required=False).get("samples") or {})
     cfg["science"] = _load_yaml(_resolve(base, config.get("science", "config/science.yaml")))
     cfg["methods"] = load_methods(_resolve(base, config.get("methods_dir", "config/methods")))
     cfg["resources"] = _load_yaml(_resolve(base, config.get("resources", "config/resources/default.yaml")))

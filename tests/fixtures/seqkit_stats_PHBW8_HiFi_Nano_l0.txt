@@ -1,2 +1,0 @@
-file                            format  type  num_seqs        sum_len  min_len      avg_len      max_len      Q1        Q2       Q3  sum_gap          N50  N50_num  Q20(%)  Q30(%)  AvgQual  GC(%)  sum_n
-PHBW8_HiFi_Nano_l0.bp.p_ctg.fa  FASTA   DNA        490  2,266,382,187   18,047  4,625,269.8  345,841,590  62,617  85,272.5  134,107        0  121,136,088        6       0       0        0  46.71      0

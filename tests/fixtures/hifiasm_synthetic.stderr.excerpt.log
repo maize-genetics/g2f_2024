@@ -1,0 +1,10 @@
+[M::ha_ft_gen] peak_hom: 25; peak_het: -1
+[M::ha_pt_gen] peak_hom: 48; peak_het: 24
+[M::ha_pt_gen] peak_hom: 49; peak_het: 24
+[M::ha_pt_gen] peak_hom: 49; peak_het: 24
+[M::print_ovlp_src_bl_stat::] ==> # passed UL reads:9876, # fully corrected UL reads:5432, # almost fully corrected UL reads:321, # UL reads have primary chains:4321
+[M::purge_dups] homozygous read coverage threshold: 24
+[M::purge_dups] purge duplication coverage threshold: 31
+[M::main] Version: 0.25.0-r726
+[M::main] CMD: hifiasm -o SAMPLE --ul /data/project/SAMPLE.ont.fastq.gz -t 32 -l0 /data/project/SAMPLE.hifi.fastq.gz
+[M::main] Real time: 12345.678 sec; CPU: 345678.901 sec; Peak RSS: 98.765 GB

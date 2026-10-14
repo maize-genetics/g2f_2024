@@ -1,0 +1,30 @@
+# Example registry of previous assemblies to QC read-only (optional). Copy to
+# config/external_assemblies.yaml (untracked) and edit. All names below are
+# invented.
+#
+# These assemblies were NOT produced by this workflow. The workflow never
+# writes into their directory: it links to the files from
+# results/<SAMPLE>/imported/<id>/ and records their identity (size, mtime,
+# fingerprint) at import time; it refuses to continue if a registered file
+# later changes.
+#
+# Results are reported separately (method_id "imported-<id>",
+# assembly_source "imported_legacy") and never mixed with pipeline output.
+#
+# qc: subset of [stats, busco, merqury]. "stats" also verifies GFA/FASTA
+# consistency of the historical conversion. "merqury" requires the sample's
+# full HiFi read QC and meryl k-mer counting (substantial compute).
+# Add the directory to legacy_dirs (config/config.yaml or config/local/config.yaml)
+# so that results_dir can never overlap it.
+
+root: ../previous_assemblies       # relative to pipeline/
+
+assemblies:
+  SAMPLE_A:
+    previous_hifi_l0:
+      description: hifiasm 0.25.0, HiFi only, -l0 (run by hand)
+      read_types: [hifi]
+      p_ctg_gfa: SAMPLE_A/SAMPLE_A.asm.bp.p_ctg.gfa
+      p_ctg_fa: SAMPLE_A/SAMPLE_A.asm.bp.p_ctg.fa
+      hifiasm_log: SAMPLE_A/SAMPLE_A.asm.stderr.log
+      qc: [stats, busco]

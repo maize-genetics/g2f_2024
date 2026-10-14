@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Test stub for BUSCO: writes the short-summary JSON of a real BUSCO run
-(tests/fixtures) under the requested output location."""
+"""Test stub for BUSCO: writes a synthetic short-summary JSON in the
+layout of a real BUSCO 6.1.0 run (tests/fixtures) under the requested output location."""
 import json
 import os
 import sys
@@ -13,7 +13,7 @@ out_path, name, lineage = (args[args.index(k) + 1] for k in ("--out_path", "-o",
 lin = os.path.basename(lineage.rstrip("/"))
 here = os.path.dirname(os.path.abspath(__file__))
 d = json.load(open(os.path.join(here, "..", "fixtures",
-                                "busco_short_summary_PHBW8_l0_liliopsida_odb10.json")))
+                                "busco_short_summary_synthetic_liliopsida_odb10.json")))
 d["lineage_dataset"]["name"] = lin
 # Real BUSCO 6.1.0 takes datasets_version from the dataset.cfg name suffix.
 d["parameters"]["datasets_version"] = "odb" + lin.split("_odb")[-1]
