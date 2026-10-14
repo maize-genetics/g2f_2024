@@ -1,8 +1,8 @@
 # Rerunning individual QC components
 
-Checked against the implementation on 2026-10-11 using dry runs on the real
-PHBW8 results, without running any QC. All commands run from `pipeline/`
-after `module load python/3.12.7`.
+Checked against the implementation using dry runs on existing results,
+without running any QC. All commands run from `pipeline/` with Snakemake on
+`PATH`.
 
 ## Summary
 
@@ -19,9 +19,8 @@ after `module load python/3.12.7`.
    access). Replace `<lineage>` with the name of a lineage BUSCO provides:
 
    ```bash
-   apptainer exec --bind /home/$USER/busco_downloads /programs/busco-6.1.0/busco.sif \
-     busco --download_path /home/$USER/busco_downloads --download <lineage>
-   cat /home/$USER/busco_downloads/lineages/<lineage>/dataset.cfg
+   busco --download_path /path/to/busco_downloads --download <lineage>
+   cat /path/to/busco_downloads/lineages/<lineage>/dataset.cfg
    ```
 
 2. **Add the lineage under `qc.busco.lineages` in `config/science.yaml`.**
@@ -41,15 +40,15 @@ after `module load python/3.12.7`.
            number_of_BUSCOs: "..."
    ```
 
-   Also record the decision in `docs/scientific_decisions.md`. Editing
+   Also record the decision in your project's decision log. Editing
    `science.yaml` changes the validation identity, so new summaries get new
    file names and the old ones are kept.
 
 3. **Dry-run and check the job list:**
 
    ```bash
-   snakemake --profile profiles/biohpc --dry-run imported_qc   # historical assemblies
-   snakemake --profile profiles/biohpc --dry-run               # workflow assemblies
+   snakemake --profile profiles/local --dry-run imported_qc   # registered previous assemblies
+   snakemake --profile profiles/local --dry-run               # workflow assemblies
    ```
 
    **What re-runs:**
@@ -69,7 +68,7 @@ after `module load python/3.12.7`.
    target also builds it; to avoid that, use the targeted form below.
 
    ```bash
-   snakemake --profile profiles/biohpc --cores 32 imported_qc
+   snakemake --profile profiles/local --cores 32 imported_qc
    ```
 
 ## Targeting one QC output, with a guard
@@ -79,20 +78,20 @@ assembly does not exist yet, "what it needs" includes read QC and hifiasm.**
 `--allowed-rules` turns that case into an error rather than an assembly:
 
 ```bash
-R=$(realpath ../results)     # targets must use the resolved path (/local/workdir/...)
-A=hifiasm-0.25.0_hifi-ont-ul50k_l0_v1     # or imported-legacy_hifi_ont_l0
-snakemake --profile profiles/biohpc --dry-run \
+R=$(realpath ../results)     # targets must use the resolved path (no symlinks)
+A=hifiasm-0.25.0_hifi-ont-ul50k_l0_v1     # or imported-<id> for a registered assembly
+snakemake --profile profiles/local --dry-run \
   --allowed-rules identity_stamp check_gfa_fasta busco validate_busco \
-  -- "$R/PHBW8/qc/$A/busco/<lineage>.validated.json"
+  -- "$R/SAMPLE_A/qc/$A/busco/<lineage>.validated.json"
 ```
 
-* The guard was verified on the real results. For the historical assembly it
-  plans 4 jobs (`identity_stamp`, `check_gfa_fasta`, `busco`,
-  `validate_busco`). For the not-yet-built workflow assembly it exits with
+* For an existing assembly the guard plans 4 jobs (`identity_stamp`, `check_gfa_fasta`, `busco`,
+  `validate_busco`). For a not-yet-built workflow assembly it exits with
   `Missing input files for rule check_gfa_fasta` and nothing runs.
 * Drop `--dry-run` (and add `--cores 32`) to run it.
-* Targets must use the resolved path: `$PWD/../results/...` from
-  `/workdir/...` does not match the workflow's output paths.
+* Targets must use the resolved path: a path through a symbolic link
+  (e.g. `$PWD/../results/...` from a symlinked directory) does not match the
+  workflow's output paths.
 
 Equivalent targets for the other QC components:
 
@@ -109,10 +108,10 @@ purpose, first **move the old output directory aside** so that it is kept,
 then force the rule:
 
 ```bash
-mv "$R/PHBW8/qc/$A/busco/poales_odb12.2" "$R/PHBW8/qc/$A/busco/poales_odb12.2.prev-$(date +%F)"
-snakemake --profile profiles/biohpc --cores 32 \
+mv "$R/SAMPLE_A/qc/$A/busco/poales_odb12.2" "$R/SAMPLE_A/qc/$A/busco/poales_odb12.2.prev-$(date +%F)"
+snakemake --profile profiles/local --cores 32 \
   --allowed-rules identity_stamp check_gfa_fasta busco validate_busco \
-  --forcerun busco -- "$R/PHBW8/qc/$A/busco/poales_odb12.2.validated.json"
+  --forcerun busco -- "$R/SAMPLE_A/qc/$A/busco/poales_odb12.2.validated.json"
 ```
 
 `--forcerun` on its own writes over the previous result in place.
@@ -125,7 +124,7 @@ result is lost by accident.
 1. **The BUSCO version is not part of the output path.** Results go to
    `busco/<lineage>/`.
    * Upgrading BUSCO (`expected_version` in `science.yaml`, plus the
-     container in `config/tools/biohpc.yaml`) does not re-run BUSCO.
+     command in your tools file) does not re-run BUSCO.
      Instead, the old result fails validation with
      `BUSCO version … != required …`, and `--forcerun` would overwrite it.
    * *Minimal change:* write to `busco/busco-<version>/<lineage>/`. That is

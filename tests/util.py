@@ -78,7 +78,7 @@ BASE_TOP = {
     "science": "config/science.yaml",
     "methods_dir": "config/methods",
     "resources": "config/resources/default.yaml",
-    "tools": "config/tools/biohpc.yaml",
+    "tools": "config/tools/default.yaml",
     "legacy_dirs": [],
 }
 

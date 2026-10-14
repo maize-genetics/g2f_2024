@@ -174,10 +174,10 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--report", required=True)
     ap.add_argument("--diagnostics", required=True)
-    ap.add_argument("--test", default="GEMS-0061,GEMS-0113",
-                    help="genotypes under investigation (excluded from the null)")
-    ap.add_argument("--exclude-queries", default="10474838_9_PAQ86658_8f1582f4_fastq",
-                    help="run ids with insufficient data (excluded from the null)")
+    ap.add_argument("--test", required=True,
+                    help="comma-separated genotypes under investigation (excluded from the null)")
+    ap.add_argument("--exclude-queries", default="",
+                    help="comma-separated run ids with insufficient data (excluded from the null)")
     a = ap.parse_args()
     test = set(a.test.split(","))
     excl = set(a.exclude_queries.split(","))

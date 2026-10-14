@@ -4,13 +4,16 @@ import json
 import math
 import os
 import shutil
+import subprocess
 import tempfile
 import unittest
+
+import yaml
 
 from util import BASE_TOP, PIPELINE_DIR, hifi_names, write_bytes
 
 from g2f import gfa, kmer, readstats, summary, validate
-from g2f.config import ConfigError, load_config
+from g2f.config import ConfigError, load_config, top_config_path
 
 FIX = os.path.join(PIPELINE_DIR, "tests", "fixtures")
 
@@ -424,6 +427,36 @@ class DiskPlanTest(unittest.TestCase):
         d = self.dp.decide("A", self.est, 200e9, {}, ["A"], 150e9, 3, own=own)
         self.assertTrue(d["start"])
 
+    def _state(self, results, running=()):
+        st = tempfile.mkdtemp(prefix="g2f_test_")
+        self.addCleanup(shutil.rmtree, st)
+        with open(f"{st}/estimates.json", "w") as fh:
+            json.dump(self.est, fh)
+        for r in running:
+            with open(f"{st}/{r}.running", "w") as fh:
+                json.dump({"retain_prepared_hifi": True}, fh)
+        return st
+
+    def test_gate_never_exceeds_the_genotype_limit(self):
+        res = tempfile.mkdtemp(prefix="g2f_test_")
+        self.addCleanup(shutil.rmtree, res)
+        st = self._state(res, running=["B"])
+        d = self.dp.gate(st, "A", res, 0, 1, "keep", 1e15)             # ample disk, 1 at a time
+        self.assertFalse(d["start"])
+        self.assertIn("already running", d["reason"])
+        self.assertFalse(os.path.exists(f"{st}/A.running"))
+        d = self.dp.gate(st, "A", res, 0, 2, "keep", 1e15)             # limit 2: may start
+        self.assertTrue(d["start"] and os.path.exists(f"{st}/A.running"))
+
+    def test_start_order(self):
+        res = tempfile.mkdtemp(prefix="g2f_test_")
+        self.addCleanup(shutil.rmtree, res)
+        for s, f in (("C", "C.asm.bp.p_ctg.gfa"), ("A", "A.asm.ec.bin")):
+            os.makedirs(f"{res}/{s}/assembly/m1")
+            open(f"{res}/{s}/assembly/m1/{f}", "w").close()
+        # C assembled (QC only), A has a checkpoint, then smallest HiFi first: D (40) < B (50)
+        self.assertEqual(self.dp.start_order(self.est, res), ["C", "A", "D", "B"])
+
 
 class VerifyPreparedTest(unittest.TestCase):
     """Run accounting of the pre-hifiasm gate against the raw-data manifest."""
@@ -469,6 +502,17 @@ class CpuSlotsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             cpus.slots(3, 40, allowed=range(119))                      # 120 > 119
 
+    def test_physical_cores_before_hyperthreads(self):
+        from g2f import cpus
+        t = tempfile.mkdtemp(prefix="g2f_test_")
+        self.addCleanup(shutil.rmtree, t)
+        for c in range(8):                         # siblings numbered adjacently: (0,1) (2,3) ...
+            os.makedirs(f"{t}/cpu{c}/topology")
+            with open(f"{t}/cpu{c}/topology/thread_siblings_list", "w") as fh:
+                fh.write(f"{c - c % 2}-{c - c % 2 + 1}\n")
+        self.assertEqual(cpus.slots(1, 4, allowed=range(8), sysfs=t), ["0,2,4,6"])
+        self.assertEqual(cpus.slots(1, 4, allowed=range(8), sysfs=f"{t}/none"), ["0-3"])
+
 
 class GenotypeWrapperPinTest(unittest.TestCase):
     """scripts/run_one_genotype.sh pins Snakemake (and so every tool) to its slot's CPU
@@ -507,6 +551,19 @@ class GenotypeWrapperPinTest(unittest.TestCase):
         with open(f"{t}/affinity") as fh:
             return set(map(int, fh.read().split()))
 
+    def test_unfinished_hifiasm_log_kept(self):
+        d = f"{self.tmp}/results/G/assembly/m1"
+        os.makedirs(d)
+        with open(f"{d}/G.asm.stderr.log", "w") as fh:
+            fh.write("partial\n")
+        self.run_wrapper([], "")
+        kept = [f for f in os.listdir(d) if f.startswith("G.asm.stderr.attempt-")]
+        self.assertEqual(len(kept), 1, os.listdir(d))
+        open(f"{d}/G.asm.bp.p_ctg.gfa", "w").close()              # finished: nothing to keep
+        os.remove(f"{d}/{kept[0]}")
+        self.run_wrapper([], "")
+        self.assertFalse([f for f in os.listdir(d) if "attempt-" in f])
+
     def test_pinned_to_slot_block(self):
         allowed = sorted(os.sched_getaffinity(0))
         if len(allowed) < 2:
@@ -514,3 +571,81 @@ class GenotypeWrapperPinTest(unittest.TestCase):
         a, b = allowed[0], allowed[1]
         self.assertEqual(self.run_wrapper(["2"], f"{a} {b}"), {b})
         self.assertEqual(self.run_wrapper([], f"{a} {b}"), set(allowed))      # no slot: unpinned
+
+
+class LauncherExclusivityTest(unittest.TestCase):
+    """scripts/run_all_assemblies.sh refuses a second launcher (project lock) and marks
+    genotypes left `running` by a dead launcher as interrupted. The sandbox has no
+    configuration, so the launcher stops at the first preflight check either way."""
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="g2f_test_")
+        os.makedirs(f"{self.tmp}/pipeline/scripts")
+        os.makedirs(f"{self.tmp}/logs/assembly_20000101_000000/state")
+        shutil.copy(f"{PIPELINE_DIR}/scripts/run_all_assemblies.sh", f"{self.tmp}/pipeline/scripts/")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def launch(self):
+        import subprocess
+        return subprocess.run(["bash", f"{self.tmp}/pipeline/scripts/run_all_assemblies.sh",
+                               "--resources", "missing.yaml"], capture_output=True, text=True)
+
+    def test_second_launcher_refused(self):
+        import fcntl
+        with open(f"{self.tmp}/logs/launcher.lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            r = self.launch()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("another launcher is running", r.stdout + r.stderr)
+
+    def test_stale_running_marked_interrupted(self):
+        old = f"{self.tmp}/logs/assembly_20000101_000000"
+        open(f"{old}/state/G.running", "w").close()
+        r = self.launch()
+        self.assertIn("resources file not found", r.stdout + r.stderr)   # got past exclusivity
+        self.assertFalse(os.path.exists(f"{old}/state/G.running"))
+        self.assertTrue(os.path.exists(f"{old}/state/G.interrupted"))
+        with open(f"{old}/status.tsv") as fh:
+            self.assertEqual(fh.read().split("\t")[:2], ["G", "interrupted"])
+
+    def write_top_config(self, launcher):
+        os.makedirs(f"{self.tmp}/pipeline/config", exist_ok=True)
+        with open(f"{self.tmp}/pipeline/config/config.yaml", "w") as fh:
+            yaml.safe_dump({"results_dir": "../results", "launcher": launcher}, fh)
+
+    def test_defaults_from_top_config(self):
+        self.write_top_config({"resources": "from_config.yaml", "threads": 8})
+        r = subprocess.run(["bash", f"{self.tmp}/pipeline/scripts/run_all_assemblies.sh"],
+                           capture_output=True, text=True, env=dict(os.environ, PIPELINE_CONFIG=""))
+        self.assertIn("resources file not found: from_config.yaml", r.stdout + r.stderr)
+
+    def test_unknown_launcher_setting_rejected(self):
+        self.write_top_config({"thread": 8})
+        r = subprocess.run(["bash", f"{self.tmp}/pipeline/scripts/run_all_assemblies.sh"],
+                           capture_output=True, text=True, env=dict(os.environ, PIPELINE_CONFIG=""))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("unknown launcher setting(s): thread", r.stderr)
+
+
+class TopConfigTest(unittest.TestCase):
+    """Top-level configuration: $PIPELINE_CONFIG, else config/local/config.yaml, else config/config.yaml."""
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="g2f_test_")
+        os.makedirs(f"{self.tmp}/config/local")
+        self.env = os.environ.pop("PIPELINE_CONFIG", None)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+        if self.env is not None:
+            os.environ["PIPELINE_CONFIG"] = self.env
+
+    def test_selection_order(self):
+        self.assertEqual(top_config_path(self.tmp), f"{self.tmp}/config/config.yaml")
+        open(f"{self.tmp}/config/local/config.yaml", "w").close()
+        self.assertEqual(top_config_path(self.tmp), f"{self.tmp}/config/local/config.yaml")
+        os.environ["PIPELINE_CONFIG"] = f"{self.tmp}/other.yaml"
+        try:
+            self.assertEqual(top_config_path(self.tmp), f"{self.tmp}/other.yaml")
+        finally:
+            del os.environ["PIPELINE_CONFIG"]

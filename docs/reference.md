@@ -1,12 +1,13 @@
 # Workflow reference
 
-Detailed behaviour of the G2F assembly workflow. Start with the main
+Detailed behaviour of the assembly workflow. Start with the main
 `README.md`; this page is for when you need the specifics. All commands run
-from `pipeline/` after `module load python/3.12.7`.
+from `pipeline/` with Snakemake on `PATH`.
 
 Contents: [Inputs](#inputs) · [Expected resources](#expected-resources) ·
 [Outputs](#outputs-resultsline) · [Resumability, reruns and safety](#resumability-reruns-and-safety) ·
-[Adding a maize line](#adding-a-maize-line) · [Common failures](#common-failures). Rerunning single QC components is
+[Running all samples](#running-all-samples) · [Adding a sample](#adding-a-sample) ·
+[Common failures](#common-failures). Rerunning single QC components is
 covered in `docs/rerunning_qc.md`.
 
 ## Inputs
@@ -69,25 +70,25 @@ transferred) is skipped with a warning, so it is never mistaken for a
 processed line:
 
 ```text
-[WARNING] NO_INPUTS (3AZA1): sample directory contains no files; sample skipped
+[WARNING] NO_INPUTS (SAMPLE_C): sample directory contains no files; sample skipped
 ```
 
-Naming such a line explicitly (`--config only_samples=3AZA1`, or
-`discover --only 3AZA1`) is an error (`REQUESTED_SAMPLE_NO_INPUTS`) and
+Naming such a line explicitly (`--config only_samples=SAMPLE_C`, or
+`discover --only SAMPLE_C`) is an error (`REQUESTED_SAMPLE_NO_INPUTS`) and
 nothing runs. The one exception is a line that has only a registered
 historical assembly (`config/external_assemblies.yaml`): it gets a warning,
 so `imported_qc` still works for it.
 
 ## Expected resources
 
-Measured or estimated on PHBW8 (about 37× HiFi).
+Measured or estimated for a ~2.3 Gb inbred maize genome (about 37× HiFi).
 
 | Step | Threads | Memory | Time | Notes |
 |---|---|---|---|---|
 | hifiasm, HiFi only | 64 (configurable) | ~66 GB | ~3 h at 100–120 threads | |
 | hifiasm, HiFi + ONT | 64 (configurable) | ~134 GB | ~4 h at 100 threads | |
 | meryl k = 21 | 32 | up to 200 GB (configured) | not yet measured | |
-| BUSCO (2.3 Gb assembly) | 32 | 64 GB requested; peak not yet recorded | 728 s (`poales_odb12.2`, PHBW8 historical HiFi+ONT `-l0`) | `docs/qc_PHBW8_imported_2026-10-11.md` |
+| BUSCO (2.3 Gb assembly) | 32 | 64 GB requested; peak not yet recorded | ~12 min (`poales_odb12.2`, HiFi+ONT `-l0` assembly) | |
 | GFA/FASTA check, seqkit stats (2.2 GB) | 1–4 | ≤ 8 GB | minutes | Reads both files once |
 | HiFi read stats + MD5 (28 GB) | 4 + 1 | ≤ 8 GB | not yet measured (expected tens of minutes) | Streaming passes |
 | Merqury | 16 | — | not yet measured | Needs the meryl database |
@@ -169,12 +170,99 @@ Snakemake tracks job states. Our part:
 * **Historical files.** A registered historical file that changes after
   import makes the workflow refuse to run.
 
-## Adding a maize line
+## Running all samples
 
-1. `mkdir -p ../data/<LINE>/{hifi,ont}` and place the reads there. Omit
+`scripts/run_all_assemblies.sh` (README, "All samples at full scale") runs
+one Snakemake process per sample. Its defaults come from the `launcher:`
+section of the top-level configuration; options override them
+(`bash scripts/run_all_assemblies.sh --help`).
+
+**Start** inside `screen` or `tmux`, after a dry run:
+
+```bash
+bash scripts/run_all_assemblies.sh --dry-run
+bash scripts/run_all_assemblies.sh 2>&1 | tee ../logs/launcher.$(date +%Y%m%d_%H%M%S).out
+```
+
+`--samples "A B C"` fixes the order; otherwise samples already assembled
+come first, then samples with hifiasm checkpoints, then the smallest HiFi
+data sets. Put the sample whose hifiasm run takes longest last: hifiasm
+writes no checkpoint until all error-correction rounds have finished.
+
+**Monitor:**
+
+```bash
+bash scripts/run_status.sh            # every sample: done/running/failed/interrupted/pending;
+                                      # current step, hifiasm stage, disk, load, memory, processes
+L=$(ls -d ../logs/assembly_2* | grep -v dryrun | tail -1)
+tail -f $L/launcher.log               # START / END / waiting / warnings
+tail -f $L/<SAMPLE>.log               # the running sample's Snakemake log ("N of M steps")
+cat $L/disk.tsv                       # free disk every 10 min
+```
+
+States: `done` (exit 0), `running`, `failed` (exit code in `status.tsv`),
+`interrupted` (launcher gone: crash, kill), `not_started` (the queue stopped
+before it), `pending`.
+
+**Disk.** Before each sample, the disk gate checks that its projected peak
+fits above the reserve (`--reserve-gb`). If it does not, the sample waits up
+to `--max-wait-h` and is then recorded `disk_wait_timeout` ("NOT STARTED:
+insufficient disk space"), and the queue stops. `disk.tsv` records free
+space every 10 min. A sample that is already running is not stopped.
+
+**Stop.** Gracefully (the current sample finishes; no new one starts):
+`touch "$L/state/STOP"`. Immediately: Ctrl-C in the session; this counts as
+an interruption and resumes as below.
+
+**Resume after a crash or interruption.**
+
+1. `bash scripts/run_status.sh` shows which sample was interrupted.
+2. If that sample was in hifiasm, decide about its `.bin` files. The
+   workflow refuses to restart hifiasm next to unreviewed `.bin` files.
+   ```bash
+   S=<SAMPLE>; D=../results/$S/assembly/<method_id>
+   ls -l --time-style=full-iso $D/*.bin
+   grep -n 'bin files have been written\|Index has been written\|write_emask_t' $D/$S.asm.stderr.log
+   ```
+   * No `.bin` files: nothing to decide; hifiasm restarts from the beginning.
+   * `ec.bin` and `ovlp.*.bin` exist, "bin files have been written." is in
+     the log, and they were written well before the interruption: they can
+     be reused. The same holds for `uidx.bin`/`ul.ovlp.bin` when "Index has
+     been written" follows them. Move aside any file written close to the
+     interruption, or whose completion is not logged. Then write the
+     approval, which hifiasm consumes and records in
+     `$S.asm.reused_bin_files.txt`:
+     `echo "<name>, <date>: reuse ec/ovlp (logged complete <time>), <reason>" > $D/$S.asm.reuse_bins.approved`
+   * Not sure: move all `.bin` files aside; hifiasm starts over.
+3. Relaunch the same command.
+
+The launcher then refuses if another launcher, or a Snakemake/hifiasm
+process in this project, is alive; marks samples left `running` as
+`interrupted` in their old log directory; removes the stale Snakemake lock;
+re-runs interrupted jobs (`--rerun-incomplete`); skips completed work; and,
+before restarting hifiasm, keeps the log of the unfinished attempt as
+`<SAMPLE>.asm.stderr.attempt-<time>.log` (Snakemake deletes a job's
+declared log on restart).
+
+What an interruption cannot corrupt: assembly outputs are write-protected
+once complete; a hifiasm result counts only after hifiasm exits 0, the
+primary GFA has sequences and the alternate GFA exists; provenance records
+keep status `running` until a step finishes; and Snakemake's
+incomplete-job markers make it re-run anything that was cut off.
+
+hifiasm checkpoints: hifiasm writes reusable `.bin` files only at fixed
+points: after all error-correction rounds and the final overlap pass
+(`ec.bin`, `ovlp.*.bin`), after the ultra-long-read index and overlaps
+(`uidx.bin`, `ul.ovlp.bin`), and during UL re-integration (`re.*`). Reusing
+them always goes through the written approval above. The thread count of a
+resumed run may differ; it is recorded in the provenance.
+
+## Adding a sample
+
+1. `mkdir -p ../data/<SAMPLE>/{hifi,ont}` and place the reads there. Omit
    `ont/` if there are no ONT data.
-2. Optionally add a `samples.yaml` entry (aliases, metadata).
-3. Run `python3 scripts/g2f_tool.py discover --only <LINE>` and resolve any
+2. Optionally add a `config/samples.yaml` entry (aliases, metadata).
+3. Run `python3 scripts/g2f_tool.py discover --only <SAMPLE>` and resolve any
    reported issue.
 4. Dry-run, then run, as above. The same versioned methods apply
    automatically.
@@ -194,5 +282,8 @@ Snakemake tracks job states. Our part:
 | `was changed after it was used` | A method file was edited in place. Restore it, or create a new `method_id` |
 | `read statistics were produced by different read-statistics code` | Regenerate the statistics with `--forcerun hifi_read_stats ont_input_stats ont_filtered_stats` |
 | `Refusing to run: hifiasm: expected version` | The tools config points at a different hifiasm build |
-| `Refusing to start: intermediate hifiasm .bin files` | A previous attempt left files behind. Move them aside |
+| `Refusing to start: intermediate hifiasm .bin files` | A previous attempt left files behind. Move them aside, or, to resume from hifiasm's checkpoints, inspect them and write who/why into `<sample>.asm.reuse_bins.approved` in the assembly directory (consumed on start; the reused files are listed in `<sample>.asm.reused_bin_files.txt`) |
+| `another launcher is running for this project` | A launcher holds `logs/launcher.lock`. Use `bash scripts/run_status.sh`; wait for it, or STOP it |
+| `Snakemake/hifiasm processes are still running in this project` | A run started outside the launcher (or an older launcher) works in this pipeline or results directory. Let it finish or stop it, then launch |
+| `NOT STARTED: insufficient disk space` | The genotype's projected peak does not fit above the reserve. Free space, then relaunch (completed work is kept) |
 | `Write-protected output files` | A finished assembly would be overwritten. Use a new `method_id`, or deliberately move the old result |

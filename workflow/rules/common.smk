@@ -21,6 +21,8 @@ K = SCI["kmer"]["k"]
 PY = sys.executable
 TOOL = f"{shlex.quote(PY)} {shlex.quote(os.path.join(PIPELINE_DIR, 'scripts', 'g2f_tool.py'))}"
 SAMPLES_YAML = os.path.join(PIPELINE_DIR, config.get("samples", "config/samples.yaml"))
+if not os.path.exists(SAMPLES_YAML):     # the samples file is optional: read as empty
+    SAMPLES_YAML = os.devnull
 
 # ---------------------------------------------------------------- discovery
 INPUTS, ISSUES = discovery.discover(CFG)

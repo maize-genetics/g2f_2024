@@ -78,12 +78,21 @@ def hifiasm_cmd(wc, input, threads):
                 f"else echo 'hifiasm outputs not verified: .bin files kept' >&2; fi")
     snap = (f"{TOOL} method-snapshot --method-file {q(meth['_file'])} "
             f"--science-version {SCI['science_version']} --out {q(method_record_path(s, m))}")
+    # Reusing .bin files from an interrupted attempt (hifiasm's checkpoints) is a
+    # human decision: a person writes {s}.asm.reuse_bins.approved (who, why). It is
+    # consumed here, so a later attempt needs a fresh approval, and the files
+    # reused are recorded in {s}.asm.reused_bin_files.txt.
+    ok, used = f"{s}.asm.reuse_bins.approved", f"{s}.asm.reused_bin_files.txt"
+    guard = (f"if ls {s}.asm.*.bin >/dev/null 2>&1; then if test -s {ok}; then "
+             f"{{ echo 'reusing hifiasm .bin files from an earlier attempt; approval:'; cat {ok}; "
+             f"date '+started %F %T with:'; ls -l {s}.asm.*.bin; }} > {used} && rm -f {ok} && "
+             f"cat {used} >&2; else echo 'Refusing to start: intermediate "
+             f"hifiasm .bin files from an earlier attempt exist in {d}. Inspect them and move them "
+             f"aside before re-running (hifiasm would silently reuse them), or approve their reuse "
+             f"in {ok}.' >&2; exit 2; fi; fi")
     return wrap(
         "hifiasm",
-        f"cd {q(d)} && "
-        f"if ls {s}.asm.*.bin >/dev/null 2>&1; then echo 'Refusing to start: intermediate "
-        f"hifiasm .bin files from an earlier attempt exist in {d}. Inspect them and move them "
-        f"aside before re-running (hifiasm would silently reuse them).' >&2; exit 2; fi && "
+        f"cd {q(d)} && {guard} && "
         f"{snap} && {run} > {s}.asm.stdout.log 2> {s}.asm.stderr.log{tidy}",
         s, prov_path(s, "hifiasm", m), tools=["hifiasm"], method_id=m,
         expect={"hifiasm": meth["expected_version"]},

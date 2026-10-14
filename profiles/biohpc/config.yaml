@@ -1,4 +1,5 @@
-# Snakemake profile for running directly on a BioHPC server (no scheduler).
+# OPTIONAL Snakemake profile for running directly on a BioHPC server (no
+# scheduler); identical to profiles/local apart from this header.
 # Usage (from pipeline/):  snakemake --profile profiles/biohpc ...
 #
 # --cores caps the total threads Snakemake schedules. Set it to what you have

@@ -1,4 +1,8 @@
-# Top-level workflow configuration.
+# Top-level workflow configuration (portable defaults).
+#
+# Which top-level file is used: $PIPELINE_CONFIG if set, otherwise
+# config/local/config.yaml if it exists (untracked; a complete copy of this
+# file edited for one project or machine), otherwise this file.
 #
 # Relative paths are resolved against the pipeline/ directory (the Snakemake
 # working directory). This file only wires the other configuration files
@@ -11,11 +15,11 @@ data_dir: ../data
 # All workflow outputs. Must not overlap data_dir or any legacy directory.
 results_dir: ../results
 
-# Historical results that the workflow must never write into.
-legacy_dirs:
-  - ../hifiasm_v0.25.0
+# Previous results that the workflow must never write into (optional).
+legacy_dirs: []
 
-# Tracked, shareable sample metadata (aliases, acknowledgements, overrides).
+# Optional per-project sample metadata (aliases, acknowledgements, overrides);
+# untracked. Template: config/samples.example.yaml.
 samples: config/samples.yaml
 
 # Versioned scientific configuration.
@@ -24,22 +28,25 @@ methods_dir: config/methods
 
 # Computational settings (swap these per machine; they never change science).
 resources: config/resources/default.yaml
-tools: config/tools/biohpc.yaml
+# Tool commands: default.yaml finds every tool on PATH; biohpc.yaml is an
+# optional Cornell BioHPC example (fixed install paths and Apptainer images).
+tools: config/tools/default.yaml
 
 # Optional raw-data manifest (TSV: genotype, technology, source_path,
-# size_bytes). If set, every genotype's local runs are reconciled with it
-# before assembly (unexpected or missing runs stop that genotype).
-raw_manifest: ../data/g2f_9genotypes_raw_reads_manifest.tsv
+# size_bytes). If set, every sample's local runs are reconciled with it
+# before assembly (unexpected or missing runs stop that sample).
+raw_manifest: ""
 
 # Optional table written by scripts/check_remote_copies.sh confirming that the
-# original files still exist on the source storage node. Needed before any
+# original files still exist on the source storage host. Needed before any
 # local raw copy is reported as safe to delete (g2f_tool.py raw-release).
-remote_copy_table: ../data/remote_copies.tsv
+remote_copy_table: ""
 
 # Optional genotype fingerprinting settings (QC only; never affects assembly).
 fingerprint: config/fingerprint.yaml
 
-# Read-only historical assemblies registered for QC benchmarking.
+# Optional read-only previous assemblies registered for QC benchmarking;
+# untracked. Template: config/external_assemblies.example.yaml.
 external_assemblies: config/external_assemblies.yaml
 
 # Optional, untracked machine-specific settings: external read-only input
@@ -47,6 +54,16 @@ external_assemblies: config/external_assemblies.yaml
 # config/local/README.md.
 local: config/local/local.yaml
 
-# Restrict the run to a subset of samples, e.g. --config only_samples=PHBW8
+# Restrict the run to a subset of samples, e.g. --config only_samples=SAMPLE_A
 # Empty list = all discovered samples.
 only_samples: []
+
+# Defaults for scripts/run_all_assemblies.sh (its command-line options
+# override them). Ignored by Snakemake.
+launcher:
+  jobs: 1                  # samples at a time
+  threads: 32              # CPUs per sample (pinned with taskset)
+  mem_gb: 128              # memory budget per sample for Snakemake scheduling
+  reserve_gb: 100          # free disk always kept in reserve
+  resources: config/resources/default.yaml
+  profile: profiles/local

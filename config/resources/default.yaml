@@ -1,10 +1,11 @@
 # Computational settings only. Changing these must never change results.
 # Threads are upper bounds per job; Snakemake also caps them at --cores.
 # mem_mb values are scheduling hints for Snakemake's --resources limit and
-# for cluster profiles; they are based on observed PHBW8 peak RSS where known.
+# for cluster profiles; sized for a ~2.3 Gb inbred maize genome. Scale them
+# with genome size and read depth.
 #
-# Do not assume the whole server is yours: on shared BioHPC machines, keep
-# the total --cores and --resources mem_mb within your reservation.
+# Do not assume the whole server is yours: on shared machines, keep the
+# total --cores and --resources mem_mb within your reservation.
 
 # Temporary directory for tools that honour TMPDIR (relative to pipeline/).
 tmpdir: ../tmp
@@ -17,7 +18,8 @@ rules:
   read_stats:     {threads: 4,  mem_mb: 8000}
   ont_filter:     {threads: 4,  mem_mb: 8000}
   meryl_count:    {threads: 32, mem_mb: 200000}
-  # PHBW8 legacy: HiFi-only peak RSS 66 GB; HiFi+ONT peak RSS 134 GB.
+  # Observed for a ~2.3 Gb inbred genome with ~37x HiFi: HiFi-only peak RSS
+  # ~66 GB; HiFi + ultra-long ONT ~134 GB.
   hifiasm_hifi:   {threads: 64, mem_mb: 100000}
   hifiasm_hifi_ont: {threads: 64, mem_mb: 180000}
   gfa_to_fasta:   {threads: 1,  mem_mb: 8000}
@@ -31,7 +33,7 @@ rules:
 
 # Deletion is opt-in: by default the pipeline deletes no reads and no
 # intermediates (raw BAM/tar inputs are never deleted). See
-# config/resources/cbsuxm01_3x40.yaml for the opt-in settings.
+# config/resources/large_node.yaml for the opt-in settings.
 cleanup:
   retain_prepared_hifi: true                 # false: delete converted HiFi FASTQ after use
   remove_hifiasm_bins_after_success: false   # true: delete .bin files after verified success

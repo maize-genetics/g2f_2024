@@ -66,6 +66,17 @@ def load_methods(methods_dir):
     return methods
 
 
+def top_config_path(pipeline_dir):
+    """The top-level configuration file: $PIPELINE_CONFIG if set, else the
+    untracked per-project config/local/config.yaml if present, else the
+    tracked portable defaults config/config.yaml."""
+    env = os.environ.get("PIPELINE_CONFIG")
+    if env:
+        return os.path.abspath(env)
+    local = os.path.join(pipeline_dir, "config", "local", "config.yaml")
+    return local if os.path.exists(local) else os.path.join(pipeline_dir, "config", "config.yaml")
+
+
 def load_config(config, pipeline_dir):
     """Expand the top-level Snakemake config dict into a validated settings dict."""
     base = pipeline_dir

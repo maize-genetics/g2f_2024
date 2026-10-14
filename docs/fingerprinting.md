@@ -22,11 +22,10 @@ Tests: `tests/test_fingerprint.py`.
 Inside the workflow (uses the discovered inputs; independent of assembly):
 
 ```bash
-module load python/3.12.7
-snakemake fingerprint --profile profiles/biohpc --cores 32 --resources mem_mb=200000
+snakemake fingerprint --profile profiles/local --cores 32 --resources mem_mb=200000
 # a subset, or other settings (target first, then --config):
-snakemake fingerprint --profile profiles/biohpc --cores 32 \
-    --config only_samples=FBLL,PHB47 fingerprint=config/fingerprint_pilot.yaml
+snakemake fingerprint --profile profiles/local --cores 32 \
+    --config only_samples=SAMPLE_A,SAMPLE_B fingerprint=config/fingerprint_pilot.yaml
 ```
 
 Outputs (never overwritten; the directory names are hashes of the settings
@@ -50,7 +49,7 @@ results/fingerprint/report-<RID>/
 Without the workflow (any lab, any layout; ONT label may be empty = unknown):
 
 ```bash
-FPY="env PYTHONPATH=/programs/sourmash-4.9.3/lib/python3.12/site-packages /programs/Python-3.12.7/bin/python3.12"
+FPY=python3      # an interpreter with sourmash installed (the fingerprint_python tool)
 $FPY scripts/g2f_fingerprint.py sketch --input reads.bam --tech hifi --label LINE_A \
     --run-id run1 --ksizes 21,31 --scaled 2000 --max-bases 15000000000 \
     --out-sig sk/A.run1.sig.gz --out-json sk/A.run1.json
@@ -207,9 +206,7 @@ in `qc_summary.md`.
 ## Resources
 
 The analysis is standard-library Python. Its memory is dominated by the
-panel's hash sets: a few GB for nine maize genotypes at scaled = 2000. It is
+panel's hash sets: a few GB for about ten maize genotypes at scaled = 2000. It is
 recorded in `parameters_and_provenance.json` and `analysis.log`. Sketching
 takes one hashing thread plus decompression at ~12-20 Mbp/s per k-size pair,
 so a 15 Gb HiFi prefix takes ~15-20 min. Sketches are 10-60 MB each.
-Measured values for this project are in
-`docs/fingerprinting_results_2026-10-12.md`.

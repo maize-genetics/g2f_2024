@@ -40,7 +40,7 @@ class RealToolsTest(WorkflowCase):
     lineage = ("poales_odb12", None)
 
     def setUp(self):
-        base = os.environ.get("TMPDIR") or "/workdir/" + os.environ.get("USER", "") + "/tmp"
+        base = os.environ.get("TMPDIR") or tempfile.gettempdir()
         self._parent = tempfile.mkdtemp(prefix="g2f_real_", dir=base)
         tempfile.tempdir, old = self._parent, tempfile.tempdir
         try:
@@ -109,7 +109,7 @@ class HifiasmMultipleUlFilesTest(unittest.TestCase):
         from realtools_data import genome, sample_reads, write_fastq
         from g2f.validate import parse_hifiasm_log
         hifiasm = "/programs/hifiasm-0.25.0/hifiasm"
-        base = os.environ.get("TMPDIR") or "/workdir/" + os.environ.get("USER", "") + "/tmp"
+        base = os.environ.get("TMPDIR") or tempfile.gettempdir()
         tmp = tempfile.mkdtemp(prefix="g2f_ul_", dir=base)
         try:
             g = genome()

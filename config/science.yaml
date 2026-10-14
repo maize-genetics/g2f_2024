@@ -1,6 +1,6 @@
 # Scientific configuration (versioned). Changing anything here changes the
-# analysis: bump science_version and record the reason in
-# docs/scientific_decisions.md.
+# analysis: bump science_version and record the reason in the project's
+# decision log.
 science_version: 2
 
 # Automatic assembly method selection. The workflow inspects validated inputs
@@ -13,8 +13,8 @@ method_policy:
   ont_absent: hifiasm-0.25.0_hifi_l0_v1
 
 # Approximate haploid genome size, used ONLY to report approximate read
-# coverage. It is not passed to hifiasm. 2.3 Gb is close to the PHBW8
-# assembly sizes (2.27-2.32 Gb); review per line if needed.
+# coverage. It is not passed to hifiasm. 2.3 Gb suits typical maize inbred
+# assemblies; set it for your species and review per line if needed.
 genome_size_bp: 2300000000
 
 # Input discovery policy.
@@ -45,7 +45,7 @@ discovery:
 
 # Read k-mer database (meryl) used by Merqury, plus a diagnostic screen of
 # the k-mer spectrum for possible residual heterozygosity. The screen is an
-# UNCALIBRATED heuristic (docs/scientific_decisions.md D6): it reports and
+# UNCALIBRATED heuristic: it reports and
 # warns; it does not estimate heterozygosity and does not block assembly.
 kmer:
   k: 21
@@ -87,7 +87,7 @@ qc:
         number_of_BUSCOs: "6188"
         archive_md5: c2cf3a2db7a23f9b8c0d3d9af54c5132
     mode: genome
-    # Historical PHBW8 runs used miniprot (BUSCO mode euk_genome_min).
+    # miniprot gene predictor (BUSCO mode euk_genome_min in earlier runs).
     gene_predictor: miniprot
   merqury:
     enabled: true

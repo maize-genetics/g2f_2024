@@ -8,7 +8,7 @@ from util import (HAVE_SAMTOOLS, hifi_names, make_cfg, mkdirs, ont_names, write_
 
 from g2f import discovery
 
-M1, M2 = "m84109_240806_024441_s4", "m84109_240611_191050_s2"
+M1, M2 = "m84000_240101_000001_s1", "m84000_240102_000002_s2"
 HIFI_ONLY = "hifiasm-0.25.0_hifi_l0_v1"
 HIFI_ONT = "hifiasm-0.25.0_hifi-ont-ul50k_l0_v1"
 
@@ -168,7 +168,7 @@ class DiscoveryTest(unittest.TestCase):
     @unittest.skipUnless(HAVE_SAMTOOLS, "samtools not available")
     def test_bam_and_derived_fasta_require_explicit_decision(self):
         d = mkdirs(self.tmp, "S1")
-        write_bam(f"{d['hifi']}/{M1}.hifi_reads.bc2027.bam", hifi_names(M1, 10), [12000] * 10, movie=M1)
+        write_bam(f"{d['hifi']}/{M1}.hifi_reads.bc1001.bam", hifi_names(M1, 10), [12000] * 10, movie=M1)
         write_fasta(f"{d['hifi']}/S1.hifi.fasta.gz", hifi_names(M1, 10), [12000] * 10)
         _, _, issues = self.run_discover()
         err = [i for i in issues if i.code == "HIFI_POSSIBLE_DERIVED_COPY"]
@@ -230,7 +230,7 @@ class DiscoveryTest(unittest.TestCase):
     def test_external_inputs_and_determinism(self):
         ext = os.path.join(self.tmp, "elsewhere")
         os.makedirs(ext)
-        f = write_fasta(f"{ext}/EB2_X.hifi.fasta.gz", hifi_names(M1, 5), [12000] * 5)
+        f = write_fasta(f"{ext}/OLD_X.hifi.fasta.gz", hifi_names(M1, 5), [12000] * 5)
         external = {"X": {"hifi": [f]}}
         cfg, inputs, issues = self.run_discover(external=external)
         self.assertEqual(codes(issues), [])

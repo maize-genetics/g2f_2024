@@ -1,6 +1,6 @@
 # Optional genotype fingerprinting (k-mer sample-identity QC; docs/fingerprinting.md).
 #
-#   snakemake --profile profiles/biohpc --cores 32 fingerprint
+#   snakemake --profile profiles/local --cores 32 fingerprint
 #
 # Independent of assembly: it reads the original input files directly (BAM,
 # FASTQ/FASTA, ONT tar), never converts or copies reads, and nothing in the

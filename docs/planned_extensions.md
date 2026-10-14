@@ -10,7 +10,7 @@ real data (see `AGENTS.md`).
 | EDTA | Repeat and transposable-element annotation | Planned |
 | GeneCAD | Gene annotation | Planned |
 | PlantCAD / PlantCAD2 | Regulatory (cis-regulatory element) annotation | Planned |
-| Comparative and pangenome analyses | Comparing the nine G2F lines with each other and with reference maize genomes | Planned |
+| Comparative and pangenome analyses | Comparing the assembled lines with each other and with reference genomes | Planned |
 | hifiasm with ropebwt3 | Possible alternative assembly approach | Candidate only: to be benchmarked separately first; not added to the production pipeline unless validated |
 
 ## Design for annotation modules
@@ -44,5 +44,5 @@ added as a new immutable method file in `config/methods/` with a new
 `method_id`. Its results would then go to their own
 `results/<LINE>/assembly/<method_id>/` directory, alongside the existing
 results and never replacing them. Before entering production it would be
-benchmarked against the validated `-l0` baselines on PHBW8, and the
-decision would be recorded in `docs/scientific_decisions.md`.
+benchmarked against the validated `-l0` baselines, and the decision would
+be recorded in the project's decision log.

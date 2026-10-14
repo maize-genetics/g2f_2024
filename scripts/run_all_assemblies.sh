@@ -1,41 +1,81 @@
 #!/usr/bin/env bash
 # Full-scale launcher: assemble and QC every genotype with the existing
-# Snakemake workflow, N genotypes at a time (default 3 x 40 threads = 120).
+# Snakemake workflow, ONE genotype at a time by default; --jobs N runs N at a
+# time. Defaults come from the `launcher:` section of the top-level
+# configuration ($PIPELINE_CONFIG, else config/local/config.yaml, else
+# config/config.yaml); command-line options override them.
 #
 # Each genotype runs as its own Snakemake process (target `per_sample`,
-# `--config only_samples=<LINE>`), so a failing genotype never stops or
-# invalidates the others, logs are per genotype, and only N genotypes hold
-# large intermediates at any time. GNU parallel starts the next genotype as
-# soon as one finishes. Rerunning the launcher resumes: completed stages are
-# not repeated (Snakemake), completed genotypes finish immediately.
+# `--config only_samples=<LINE>`), so logs are per genotype and only one
+# genotype holds large intermediates at a time. The next genotype starts only
+# after the previous one completed (exit 0); by default the first failure,
+# STOP or refusal ends the queue (--on-failure continue: carry on). Rerunning
+# the launcher resumes: completed stages are not repeated (Snakemake),
+# completed genotypes finish immediately, and genotypes left `running` by a
+# crashed launcher are marked `interrupted` in their old log directory.
+#
+# Never more than N genotypes run: GNU parallel -j N, a hard limit in the disk
+# gate (scripts/g2f/diskplan.py), and a project-wide lock (logs/launcher.lock)
+# that refuses a second launcher, or a launch while Snakemake/hifiasm processes
+# are working in this pipeline or results directory. Each genotype's Snakemake,
+# and every tool it runs, is pinned (taskset) to its own block of T CPUs, one
+# per physical core.
 #
 # Run from pipeline/. Review first:
 #   bash scripts/run_all_assemblies.sh --dry-run
-# Then start (survives logout):
-#   nohup bash scripts/run_all_assemblies.sh > ../logs/launcher.$(date +%Y%m%d_%H%M%S).out 2>&1 &
-# or inside `screen`. Monitor:  cat ../logs/assembly_<stamp>/status.tsv
-#                               tail ../logs/assembly_<stamp>/<LINE>.log
+# Then start inside `screen` or `tmux` (docs/reference.md, Running all samples):
+#   bash scripts/run_all_assemblies.sh 2>&1 | tee ../logs/launcher.$(date +%Y%m%d_%H%M%S).out
+# Monitor:  bash scripts/run_status.sh
 #
 # Options:
-#   --jobs N            genotypes in parallel (default 3)
-#   --threads T         threads per genotype (default 40). Enforced: each running
+#   --jobs N            genotypes at a time (default 1)
+#   --threads T         threads per genotype (default 32). Enforced: each running
 #                       genotype is pinned (taskset) to its own block of T CPUs,
 #                       so the run never uses more than jobs x threads CPUs
-#   --mem-gb G          memory budget per genotype for Snakemake scheduling (default 300)
-#   --reserve-gb R      free disk always kept in reserve by the disk gate (default 150)
+#   --mem-gb G          memory budget per genotype for Snakemake scheduling (default 128)
+#   --reserve-gb R      free disk always kept in reserve by the disk gate (default 100)
 #   --retain-hifi M     prepared HiFi FASTQ retention: keep (default; nothing is
 #                       deleted), auto (the disk gate may make it temporary per
 #                       genotype), or temp (always delete after use). With auto or
 #                       temp, keep the raw BAMs: they become the only local copy.
-#   --max-wait-h H      a genotype waiting this long for disk space fails (default 48)
-#   --samples "A B"     only these genotypes (default: all discovered), in this order
-#   --resources FILE    resources file (default config/resources/cbsuxm01_3x40.yaml)
+#   --max-wait-h H      a genotype waiting this long for disk space fails (default 1)
+#   --on-failure M      stop (default): a genotype that does not complete ends the
+#                       queue; continue: start the next genotype anyway
+#   --samples "A B"     only these genotypes, in this order (default: all discovered;
+#                       assembled first, then hifiasm checkpoints, then smallest HiFi)
+#   --resources FILE    resources file (default config/resources/default.yaml)
+#   --profile DIR       Snakemake profile (default profiles/local)
 #   --dry-run           preflight + `snakemake -n` per genotype; executes nothing
+# (The defaults above are those of the tracked config/config.yaml.)
 set -euo pipefail
 
-JOBS=3; THREADS=40; MEM_GB=300; RESERVE_GB=150; RETAIN_MODE=keep; MAX_WAIT_H=48
-SAMPLES=""; DRY=0
-RESOURCES=config/resources/cbsuxm01_3x40.yaml
+cd "$(dirname "$0")/.."
+PIPE=$(pwd)
+# Environment modules (e.g. Cornell BioHPC); a no-op where the module does not exist.
+if command -v module >/dev/null 2>&1; then module load python/3.12.7 >/dev/null 2>&1 || true; fi
+JOBS=1; THREADS=32; MEM_GB=128; RESERVE_GB=100; RETAIN_MODE=keep; MAX_WAIT_H=1
+SAMPLES=""; DRY=0; ON_FAILURE=stop
+RESOURCES=config/resources/default.yaml; PROFILE=profiles/local
+if [[ -n ${PIPELINE_CONFIG:-} ]]; then TOPCFG=$PIPELINE_CONFIG
+elif [[ -f config/local/config.yaml ]]; then TOPCFG=config/local/config.yaml
+else TOPCFG=config/config.yaml; fi
+if [[ -f $TOPCFG ]]; then
+    DEFAULTS=$(python3 - "$TOPCFG" <<'PYEOF'
+import shlex, sys, yaml
+names = {"jobs": "JOBS", "threads": "THREADS", "mem_gb": "MEM_GB", "reserve_gb": "RESERVE_GB",
+         "retain_hifi": "RETAIN_MODE", "max_wait_h": "MAX_WAIT_H", "on_failure": "ON_FAILURE",
+         "resources": "RESOURCES", "profile": "PROFILE"}
+with open(sys.argv[1]) as fh:
+    d = (yaml.safe_load(fh) or {}).get("launcher") or {}
+bad = sorted(set(d) - set(names))
+if bad:
+    sys.exit(f"{sys.argv[1]}: unknown launcher setting(s): {', '.join(bad)}")
+for k, v in d.items():
+    print(f"{names[k]}={shlex.quote(str(v))}")
+PYEOF
+) || exit 2
+    eval "$DEFAULTS"
+fi
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --jobs) JOBS=$2; shift 2 ;;
@@ -44,17 +84,17 @@ while [[ $# -gt 0 ]]; do
         --reserve-gb) RESERVE_GB=$2; shift 2 ;;
         --retain-hifi) RETAIN_MODE=$2; shift 2 ;;
         --max-wait-h) MAX_WAIT_H=$2; shift 2 ;;
+        --on-failure) ON_FAILURE=$2; shift 2 ;;
         --samples) SAMPLES=$2; shift 2 ;;
         --resources) RESOURCES=$2; shift 2 ;;
+        --profile) PROFILE=$2; shift 2 ;;
         --dry-run) DRY=1; shift ;;
-        -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,52p' "$0"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
 
-cd "$(dirname "$0")/.."
-PIPE=$(pwd)
-if command -v module >/dev/null 2>&1; then module load python/3.12.7 >/dev/null 2>&1 || true; fi
+PIPELINE_CONFIG=$(realpath -m "$TOPCFG"); export PIPELINE_CONFIG
 unset OMP_NUM_THREADS   # rules that need it set it themselves
 STAMP=$(date +%Y%m%d_%H%M%S)
 LOGDIR=$(realpath -m "$PIPE/../logs/assembly_$STAMP")
@@ -63,10 +103,49 @@ mkdir -p "$LOGDIR"
 say() { echo "[$(date '+%F %T')] $*" | tee -a "$LOGDIR/launcher.log"; }
 die() { say "ERROR: $*"; exit 1; }
 
+[[ $ON_FAILURE == stop || $ON_FAILURE == continue ]] || die "--on-failure must be stop or continue"
+
+# ------------------------------------------------------------------ exclusivity
+# One launcher per project: the lock is held until this process exits and is
+# released by the kernel however it ends (crash, kill, reboot), so it never
+# goes stale. Dry runs execute nothing and do not take it.
+LOGROOT=$(dirname "$LOGDIR")
+if [[ $DRY -eq 0 ]]; then
+    exec 9>"$LOGROOT/launcher.lock"
+    flock -n 9 || die "another launcher is running for this project (lock $LOGROOT/launcher.lock)"
+    # Also refuse while a Snakemake or hifiasm process of this user works in
+    # this pipeline or results directory (e.g. one started by hand, or by an
+    # older launcher without the lock). Other projects' runs do not count.
+    PAT='^\S+ \S*/snakemake |^\S*snakemake |^\S*hifiasm '
+    RES_EARLY=$(python3 -c 'import os,sys,yaml;print(os.path.normpath(os.path.join(sys.argv[1], (yaml.safe_load(open(sys.argv[2])) or {}).get("results_dir", "../results"))))' "$PIPE" "$PIPELINE_CONFIG" 2>/dev/null \
+        || echo "$PIPE/../results")
+    RES_EARLY=$(realpath -m "$RES_EARLY")
+    BUSY=""
+    for pid in $(pgrep -u "$(id -u)" -f "$PAT" || true); do
+        cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null) || continue
+        case "$cwd/" in "$PIPE"/*|"$RES_EARLY"/*) BUSY+="$pid " ;; esac
+    done
+    if [[ -n $BUSY ]]; then
+        ps -o pid=,args= -p "$(echo $BUSY | tr ' ' ,)" | tee -a "$LOGDIR/launcher.log" >&2
+        die "Snakemake/hifiasm processes are still running in this project (listed above); stop them or wait"
+    fi
+    # Genotypes left `running` by an earlier launcher can only be interrupted
+    # runs now (we hold the lock): mark them, so status is never ambiguous.
+    for f in "$LOGROOT"/assembly_*/state/*.running; do
+        [[ -e $f && $f != "$LOGDIR"/* ]] || continue
+        g=$(basename "$f" .running); old=$(dirname "$(dirname "$f")")
+        mv "$f" "${f%.running}.interrupted"
+        printf '%s\tinterrupted\t-\t-\t%s\t%s\n' "$g" "$(date '+%F %T')" "$old/$g.log" >> "$old/status.tsv"
+        say "marked $g in $(basename "$old") as interrupted (its launcher is gone)"
+    done
+fi
+
 # ------------------------------------------------------------------ preflight
+say "configuration: $PIPELINE_CONFIG; profile: $PROFILE"
 say "pipeline: $PIPE (git $(git rev-parse --short HEAD 2>/dev/null || echo '?')$(git diff --quiet 2>/dev/null || echo ', UNCOMMITTED CHANGES'))"
 [[ -f "$RESOURCES" ]] || die "resources file not found: $RESOURCES"
-command -v snakemake >/dev/null || die "snakemake not found (module load python/3.12.7)"
+[[ -f "$PROFILE/config.yaml" ]] || die "Snakemake profile not found: $PROFILE"
+command -v snakemake >/dev/null || die "snakemake (>= 8) not found on PATH"
 SMK_VER=$(snakemake --version); [[ ${SMK_VER%%.*} -ge 8 ]] || die "Snakemake >= 8 required (found $SMK_VER)"
 command -v parallel >/dev/null || die "GNU parallel not found"
 command -v taskset >/dev/null || die "taskset not found (needed to enforce the thread limit)"
@@ -76,7 +155,7 @@ python3 - "$PIPE" <<'EOF' || die "tool check failed (see above)"
 import os, shlex, sys, yaml
 sys.path.insert(0, os.path.join(sys.argv[1], "scripts"))
 from g2f.config import load_config
-with open(os.path.join(sys.argv[1], "config", "config.yaml")) as fh:
+with open(os.environ["PIPELINE_CONFIG"]) as fh:
     cfg = load_config(yaml.safe_load(fh), sys.argv[1])
 bad = []
 for name in ("hifiasm", "seqkit", "samtools", "bam2fastq", "pbindex", "meryl", "merqury", "busco"):
@@ -92,7 +171,7 @@ for b in bad:
 sys.exit(1 if bad else 0)
 EOF
 
-RESDIR=$(python3 -c "import os,yaml;print(os.path.normpath(os.path.join('$PIPE', yaml.safe_load(open('config/config.yaml'))['results_dir'])))")
+RESDIR=$(python3 -c "import os,yaml;print(os.path.normpath(os.path.join('$PIPE', yaml.safe_load(open('$PIPELINE_CONFIG'))['results_dir'])))")
 mkdir -p "$RESDIR"
 FREE_GB=$(( $(df --output=avail -B1 "$RESDIR" | tail -1) / 1000000000 ))
 say "free disk on $(df --output=target "$RESDIR" | tail -1 | tr -d ' '): ${FREE_GB} GB; reserve ${RESERVE_GB} GB; prepared HiFi FASTQ retention: ${RETAIN_MODE}"
@@ -103,24 +182,24 @@ say "memory: ${MEM_AVAIL_GB} GB available + ${ARC_GB} GB ZFS cache (reclaimable)
 say "load average: $(cut -d' ' -f1-3 /proc/loadavg); threads requested: ${JOBS} x ${THREADS} = $((JOBS * THREADS))"
 say "CPU blocks, one per running genotype (enforced with taskset): $CPU_SLOTS"
 
-# Genotypes, largest HiFi input first so the longest assembly does not run last.
+# Disk projection per genotype (scripts/g2f/diskplan.py) and the plan for this launch.
+STATE="$LOGDIR/state"; mkdir -p "$STATE"
+python3 scripts/g2f_tool.py discover --config "$PIPELINE_CONFIG" --json 2>/dev/null \
+    | python3 scripts/g2f_tool.py disk-estimates --out "$STATE/estimates.json" ${SAMPLES:+--only $SAMPLES} \
+    || die "disk estimates failed"
+# Default order (diskplan.start_order): genotypes already assembled (QC only),
+# then those with a hifiasm checkpoint, then the rest, smallest HiFi first, so
+# assemblies finish as early as possible and the least work is exposed to an outage.
 if [[ -z "$SAMPLES" ]]; then
-    SAMPLES=$(python3 scripts/g2f_tool.py discover --json | python3 -c '
-import json, sys
-recs = json.load(sys.stdin)
-recs = recs["samples"] if isinstance(recs, dict) else recs
-size = {r["sample"]: sum(i["size"] for i in r["inputs"] if i["tech"] == "hifi" and i["status"] == "use")
-        for r in recs}
-print(" ".join(sorted(size, key=lambda s: -size[s])))')
+    SAMPLES=$(python3 -c '
+import json, os, sys
+sys.path.insert(0, os.path.join(sys.argv[1], "scripts"))
+from g2f import diskplan
+print(" ".join(diskplan.start_order(json.load(open(sys.argv[2])), sys.argv[3])))
+' "$PIPE" "$STATE/estimates.json" "$RESDIR") || die "start order failed"
 fi
 [[ -n "$SAMPLES" ]] || die "no genotypes discovered"
 say "genotypes (in start order): $SAMPLES"
-
-# Disk projection per genotype (scripts/g2f/diskplan.py) and the plan for this launch.
-STATE="$LOGDIR/state"; mkdir -p "$STATE"
-python3 scripts/g2f_tool.py discover --json 2>/dev/null \
-    | python3 scripts/g2f_tool.py disk-estimates --out "$STATE/estimates.json" --only $SAMPLES \
-    || die "disk estimates failed"
 python3 - "$STATE/estimates.json" "$FREE_GB" "$RESERVE_GB" "$JOBS" <<'EOF' | tee -a "$LOGDIR/launcher.log"
 import json, sys
 est = json.load(open(sys.argv[1])); free, reserve, jobs = float(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4])
@@ -139,9 +218,11 @@ if worst / G > free - reserve:
           "minus reserve; the disk gate will make genotypes wait for space")
 EOF
 
-COMMON=(--profile profiles/biohpc --rerun-triggers mtime)
+COMMON=(--profile "$PROFILE" --rerun-triggers mtime)
 say "whole-project dry run (discovery, configuration, DAG) ..."
-snakemake per_sample "${COMMON[@]}" --cores "$THREADS" -n --config "resources=$RESOURCES" \
+# --rerun-incomplete as in the per-genotype runs: after an interruption the
+# killed jobs are rerun, not reported as an error (resume must work)
+snakemake per_sample "${COMMON[@]}" --cores "$THREADS" -n --rerun-incomplete --config "resources=$RESOURCES" \
     > "$LOGDIR/dryrun_all.log" 2>&1 \
     || die "dry run failed; see $LOGDIR/dryrun_all.log"
 grep -A40 '^Job stats' "$LOGDIR/dryrun_all.log" | tee -a "$LOGDIR/launcher.log" || true
@@ -151,7 +232,7 @@ import json, subprocess, sys
 git = lambda *a: subprocess.run(["git", *a], capture_output=True, text=True).stdout.strip()
 json.dump({"started": "$STAMP", "dry_run": bool($DRY), "git_commit": git("rev-parse", "HEAD"),
            "git_dirty": bool(git("status", "--porcelain")), "jobs": $JOBS, "threads": $THREADS,
-           "mem_gb_per_genotype": $MEM_GB, "cpu_slots": "$CPU_SLOTS".split(), "resources": "$RESOURCES", "samples": "$SAMPLES".split(),
+           "mem_gb_per_genotype": $MEM_GB, "on_failure": "$ON_FAILURE", "cpu_slots": "$CPU_SLOTS".split(), "resources": "$RESOURCES", "config": "$PIPELINE_CONFIG", "profile": "$PROFILE", "samples": "$SAMPLES".split(),
            "snakemake": "$SMK_VER", "free_disk_gb": $FREE_GB, "host": "$(hostname)"},
           open(sys.argv[1], "w"), indent=2)
 EOF
@@ -170,12 +251,17 @@ if [[ $DRY -eq 1 ]]; then
 fi
 
 # ------------------------------------------------------------------ execution
+# A crash leaves Snakemake's directory lock behind; no Snakemake process of
+# this user is alive (checked above, under the launcher lock), so it is stale.
+say "removing any stale Snakemake lock left by an interrupted run"
+snakemake --unlock "${COMMON[@]}" --cores 1 --config "resources=$RESOURCES" >> "$LOGDIR/launcher.log" 2>&1 \
+    || die "snakemake --unlock failed"
 say "creating the shared validation-identity stamp"
 snakemake identity_stamp "${COMMON[@]}" --cores 1 --config "resources=$RESOURCES" \
     >> "$LOGDIR/launcher.log" 2>&1 || die "could not create the identity stamp"
 
 printf 'genotype\texit\tretain_prepared_hifi\tstarted\tended\tlog\n' > "$LOGDIR/status.tsv"
-export LOGDIR STATE RESDIR RESOURCES THREADS MEM_GB RESERVE_GB JOBS RETAIN_MODE MAX_WAIT_H CPU_SLOTS
+export LOGDIR STATE RESDIR RESOURCES PROFILE THREADS MEM_GB RESERVE_GB JOBS RETAIN_MODE MAX_WAIT_H CPU_SLOTS
 
 # Disk monitor: free space and results size every 10 minutes.
 ( set +e +o pipefail
@@ -191,13 +277,20 @@ export LOGDIR STATE RESDIR RESOURCES THREADS MEM_GB RESERVE_GB JOBS RETAIN_MODE 
 MONITOR=$!
 trap 'kill $MONITOR 2>/dev/null' EXIT
 
-say "starting: ${JOBS} genotypes at a time, ${THREADS} threads each; logs in $LOGDIR"
+say "starting: ${JOBS} genotype(s) at a time, ${THREADS} threads each, on failure: ${ON_FAILURE}; logs in $LOGDIR"
 say "drain gracefully (finish running genotypes, start no new ones): touch $STATE/STOP"
-printf '%s\n' $SAMPLES | parallel -j "$JOBS" --halt never --joblog "$LOGDIR/joblog.tsv" \
+# stop: after the first genotype that does not complete, start no further one
+# (running ones finish); continue: start every genotype regardless.
+HALT=never; [[ $ON_FAILURE == stop ]] && HALT=soon,fail=1
+printf '%s\n' $SAMPLES | parallel -j "$JOBS" --halt "$HALT" --joblog "$LOGDIR/joblog.tsv" \
     bash scripts/run_one_genotype.sh {} {%} || true
+for s in $SAMPLES; do      # genotypes the queue never reached: pending, not failed
+    awk -F'\t' -v s="$s" 'NR>1 && $1==s{f=1} END{exit !f}' "$LOGDIR/status.tsv" \
+        || printf '%s\tnot_started\t-\t-\t-\t-\n' "$s" >> "$LOGDIR/status.tsv"
+done
 
-python3 scripts/g2f_tool.py raw-release >> "$LOGDIR/launcher.log" 2>&1 || true
-FAILED=$(awk -F'\t' 'NR>1 && $2!=0{print $1}' "$LOGDIR/status.tsv" | tr '\n' ' ')
+python3 scripts/g2f_tool.py raw-release --config "$PIPELINE_CONFIG" >> "$LOGDIR/launcher.log" 2>&1 || true
+FAILED=$(awk -F'\t' 'NR>1 && $2!=0{print $1 "(" $2 ")"}' "$LOGDIR/status.tsv" | tr '\n' ' ')
 if [[ -n "$FAILED" ]]; then
     say "NOT COMPLETED: $FAILED (see status.tsv and their logs; the others are complete). Fix, then"
     say "rerun this launcher: completed work is not repeated. Project summary not built."

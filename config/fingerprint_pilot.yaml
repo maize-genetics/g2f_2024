@@ -1,7 +1,7 @@
-# PILOT settings (2026-10-12): identical to fingerprint.yaml except for smaller
-# per-input sampling caps (8 Gb HiFi, 4 Gb ONT), used for the bounded pilot on
-# FBLL, PHB47, GEMS-0219 and PHBW8 before running all genotypes.
-#   --config fingerprint=config/fingerprint_pilot.yaml only_samples=FBLL,PHB47,GEMS-0219,PHBW8
+# PILOT settings: identical to fingerprint.yaml except for smaller per-input
+# sampling caps (8 Gb HiFi, 4 Gb ONT), for a bounded pilot on a few samples
+# before running all of them, e.g.
+#   --config fingerprint=config/fingerprint_pilot.yaml only_samples=SAMPLE_A,SAMPLE_B
 #
 # Optional genotype fingerprinting (k-mer sample-identity QC); see
 # docs/fingerprinting.md. Independent of assembly: these settings never change

@@ -23,7 +23,7 @@ from util import (HAVE_SAMTOOLS, HAVE_SEQKIT, PIPELINE_DIR, SAMTOOLS, SEQKIT, hi
 STUBS = os.path.join(PIPELINE_DIR, "tests", "stubs")
 HIFI_ONT = "hifiasm-0.25.0_hifi-ont-ul50k_l0_v1"
 HIFI_ONLY = "hifiasm-0.25.0_hifi_l0_v1"
-M1, M2, M3 = "m84109_240806_024441_s4", "m84109_240611_191050_s2", "m64001_220101_000000"
+M1, M2, M3 = "m84000_240101_000001_s1", "m84000_240102_000002_s2", "m64001_220101_000000"
 HEAVY = {"hifiasm", "checksum", "hifi_read_stats", "hifi_bam_to_fastq", "ont_input_stats",
          "ont_filter", "meryl_count", "busco", "merqury", "gfa_to_fasta", "assembly_stats"}
 
@@ -84,7 +84,7 @@ class WorkflowCase(unittest.TestCase):
         if cfgtext is not None:
             os.makedirs(os.path.join(t, "lineages", name))
             write_bytes(os.path.join(t, "lineages", name, "dataset.cfg"), cfgtext)
-        self.samples = {"samples": {"S1": {"aliases": ["EB2_S1"]}}}
+        self.samples = {"samples": {"S1": {"aliases": ["OLD_S1"]}}}
         with open(os.path.join(PIPELINE_DIR, "config", "science.yaml")) as fh:
             self.science = yaml.safe_load(fh)
         self.adjust_science()
@@ -106,7 +106,7 @@ class WorkflowCase(unittest.TestCase):
     def build_data(self):
         t = self.tmp
         s1 = mkdirs(t, "S1", ("hifi", "ont"))
-        write_bam(f"{s1['hifi']}/{M1}.hifi_reads.bc2027.bam", hifi_names(M1, 10), [3000] * 10, movie=M1)
+        write_bam(f"{s1['hifi']}/{M1}.hifi_reads.bc1001.bam", hifi_names(M1, 10), [3000] * 10, movie=M1)
         write_fastq(f"{s1['hifi']}/{M2}.hifi.fastq.gz", hifi_names(M2, 10), [3500] * 10, seed=2)
         write_fastq(f"{s1['ont']}/fc1.fastq.gz", ont_names(12, seed=1), [4000, 52000, 61000] * 4, seed=3)
         write_fastq(f"{s1['ont']}/fc2.fastq.gz", ont_names(6, seed=2), [70000, 1000] * 3, seed=4)
@@ -134,7 +134,7 @@ class WorkflowCase(unittest.TestCase):
         cmd = [sys.executable, "-m", "snakemake", "-s", f"{PIPELINE_DIR}/workflow/Snakefile",
                "--directory", self.tmp, "--configfile", f"{self.tmp}/config.yaml",
                "--cores", cores, *args, "--rerun-triggers", "mtime"]
-        e = dict(os.environ, TMPDIR=self.tmp, **(env or {}))
+        e = dict(os.environ, TMPDIR=self.tmp, PIPELINE_CONFIG=f"{self.tmp}/config.yaml", **(env or {}))
         r = subprocess.run(cmd, capture_output=True, text=True, env=e)
         r.all = r.stdout + r.stderr
         return r
@@ -150,7 +150,7 @@ class WorkflowCase(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_SAMTOOLS and HAVE_SEQKIT and have_snakemake(),
-                     "needs samtools, seqkit and snakemake (module load python/3.12.7)")
+                     "needs samtools, seqkit and snakemake on PATH")
 class WorkflowTest(WorkflowCase):
     # ------------------------------------------------------------------ dry runs
     def test_dry_run_resolves_both_methods(self):
@@ -267,7 +267,7 @@ class WorkflowTest(WorkflowCase):
         with open(f"{res}/S1/assembly/{HIFI_ONT}/S1.{HIFI_ONT}.method.json") as fh:
             self.assertEqual(json.load(fh)["fingerprint"], s1["method_fingerprint"])
         self.assertTrue(os.path.exists(
-            f"{res}/S1/reads/hifi/converted/{M1}.hifi_reads.bc2027.pbtk/in.bam.pbi"))
+            f"{res}/S1/reads/hifi/converted/{M1}.hifi_reads.bc1001.pbtk/in.bam.pbi"))
         self.assertFalse(glob.glob(f"{self.tmp}/data/S1/hifi/*.pbi"), "data/ must not be modified")
         fa = f"{res}/S1/assembly/{HIFI_ONT}/S1.{HIFI_ONT}.p_ctg.fa"
         self.assertFalse(os.access(fa, os.W_OK))
@@ -340,6 +340,23 @@ class WorkflowTest(WorkflowCase):
         r = self.smk(target)
         self.assertEqual(r.returncode, 0, r.stderr[-3000:])
 
+    def test_approved_bin_reuse(self):
+        """An approval file lets an interrupted hifiasm reuse its .bin checkpoints;
+        it is consumed and the reused files are recorded."""
+        target = f"{self.tmp}/results/S2/assembly/{HIFI_ONLY}/S2.asm.bp.p_ctg.gfa"
+        r = self.smk(target, env={"STUB_HIFIASM_FAIL": "1"})
+        self.assertNotEqual(r.returncode, 0)
+        d = os.path.dirname(target)
+        with open(f"{d}/S2.asm.reuse_bins.approved", "w") as fh:
+            fh.write("tester: ec.bin complete\n")
+        r = self.smk(target)
+        self.assertEqual(r.returncode, 0, r.stderr[-3000:])
+        self.assertFalse(os.path.exists(f"{d}/S2.asm.reuse_bins.approved"))
+        with open(f"{d}/S2.asm.reused_bin_files.txt") as fh:
+            rec = fh.read()
+        self.assertIn("tester: ec.bin complete", rec)
+        self.assertIn("S2.asm.ec.bin", rec)
+
     def test_default_deletes_nothing(self):
         """With the shipped default cleanup settings no reads or intermediates are deleted:
         converted HiFi FASTQ, filtered ONT FASTQ and hifiasm .bin files all remain."""
@@ -390,7 +407,8 @@ class WorkflowTest(WorkflowCase):
                    "--cores", "1", "per_sample", "--rerun-triggers", "mtime",
                    "--config", f"only_samples={s}"]
             procs.append(subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                          text=True, env=dict(os.environ, TMPDIR=self.tmp)))
+                                          text=True, env=dict(os.environ, TMPDIR=self.tmp,
+                                                              PIPELINE_CONFIG=f"{self.tmp}/config.yaml")))
         outs = [p.communicate()[0] for p in procs]
         for p, out in zip(procs, outs):
             self.assertEqual(p.returncode, 0, out[-4000:])
@@ -403,7 +421,7 @@ class WorkflowTest(WorkflowCase):
         """Prepared inputs verified before hifiasm; a local raw BAM becomes eligible for manual
         deletion only with a retained (not temporary) prepared FASTQ and a confirmed remote copy; after it is
         deleted the workflow resumes with nothing to redo; deleting anything else stops it."""
-        bam = f"{self.tmp}/data/S1/hifi/{M1}.hifi_reads.bc2027.bam"
+        bam = f"{self.tmp}/data/S1/hifi/{M1}.hifi_reads.bc1001.bam"
         man, remote = f"{self.tmp}/manifest.tsv", f"{self.tmp}/remote.tsv"
         src = f"/remote/Zea/{os.path.basename(bam)}"
         with open(man, "w") as fh:
@@ -475,6 +493,14 @@ class WorkflowTest(WorkflowCase):
         cur = {r[0]: dict(zip(rows[0], r)) for r in rows[1:]}
         self.assertEqual(cur["S2"]["kmer_assessment"], "flagged_reviewed")
         self.assertEqual(cur["S1"]["kmer_assessment"], "flagged_unreviewed")
+
+    def test_runs_without_samples_file(self):
+        """The per-project samples file is optional (generic use: data/<SAMPLE>/ only)."""
+        self.config["samples"] = f"{self.tmp}/no_such_samples.yaml"
+        self.write_yaml("config.yaml", self.config)
+        r = self.smk()
+        self.assertEqual(r.returncode, 0, r.stderr[-3000:])
+        self.assertEqual(set(self.summary_rows()), {"S1", "S2"})
 
     def test_kmer_blocking_mode(self):
         self.science["kmer"]["screen"]["block_assembly_on_flag"] = True

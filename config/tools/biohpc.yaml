@@ -1,9 +1,9 @@
-# Tool commands for Cornell BioHPC servers. Computational environment only.
-# Each entry: the command prefix used by the workflow, and the command used
-# to report its version (recorded in provenance at execution time).
-#
-# For another site, copy this file, edit the commands, and point
-# config/config.yaml (or --config tools=...) at the copy.
+# OPTIONAL tool commands for Cornell BioHPC servers (public /programs
+# installs and Apptainer images). Select with `tools: config/tools/biohpc.yaml`
+# in config/local/config.yaml. The portable default is config/tools/default.yaml.
+# Computational environment only. Each entry: the command prefix used by the
+# workflow, and the command used to report its version (recorded in
+# provenance at execution time).
 
 tools:
   hifiasm:

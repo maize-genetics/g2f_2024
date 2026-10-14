@@ -1,7 +1,8 @@
 """CPU blocks for the full-scale launcher: a hard thread cap per genotype.
 
 Each concurrently running genotype is pinned (taskset) to its own block of
-`threads` logical CPUs taken from the CPUs this process may use. Every tool and
+`threads` logical CPUs taken from the CPUs this process may use, one per
+physical core before any hyperthread sibling. Every tool and
 helper inherits the pin, so the run never uses more than jobs x threads CPUs,
 whatever extra threads a tool starts.
 """
@@ -21,11 +22,32 @@ def compress(cpus):
     return ",".join(out)
 
 
-def slots(jobs, threads, allowed=None):
-    """One disjoint CPU list per job slot (slot n = list n-1)."""
+def core_first(cpus, sysfs="/sys/devices/system/cpu"):
+    """Order CPUs so one logical CPU of every physical core comes before any
+    second hyperthread of a core (whatever the host's CPU numbering), then by
+    number. Without topology information: numeric order."""
+    rank = {}
+    for c in cpus:
+        try:
+            with open(f"{sysfs}/cpu{c}/topology/thread_siblings_list") as fh:
+                sib = sorted(int(x) for part in fh.read().strip().split(",")
+                             for x in _expand(part))
+            rank[c] = sib.index(c)
+        except (OSError, ValueError):
+            rank[c] = 0
+    return sorted(cpus, key=lambda c: (rank[c], c))
+
+
+def _expand(part):
+    a, _, b = part.partition("-")
+    return range(int(a), int(b or a) + 1)
+
+
+def slots(jobs, threads, allowed=None, sysfs="/sys/devices/system/cpu"):
+    """One disjoint CPU list per job slot (slot n = list n-1), physical cores first."""
     if jobs < 1 or threads < 1:
         raise ValueError("jobs and threads must be >= 1")
-    allowed = sorted(os.sched_getaffinity(0) if allowed is None else allowed)
+    allowed = core_first(sorted(os.sched_getaffinity(0) if allowed is None else allowed), sysfs)
     need = jobs * threads
     if need > len(allowed):
         raise ValueError(f"{jobs} genotypes x {threads} threads = {need} CPUs requested, but only "

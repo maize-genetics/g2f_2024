@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # Confirm that the original sequencing files listed in the raw-data manifest
-# still exist, at the manifest size, on the source storage node. Read-only:
+# still exist, at the manifest size, on the source storage host. Read-only:
 # one SSH session running `stat` (you may be asked for your password).
 #
-#   bash scripts/check_remote_copies.sh                     # defaults below
-#   bash scripts/check_remote_copies.sh MANIFEST HOST OUT
+#   bash scripts/check_remote_copies.sh MANIFEST USER@HOST [OUT]
 #
-# Writes OUT (default ../data/remote_copies.tsv; set as remote_copy_table in
-# config/config.yaml): source_path, exists, size, mtime, checked_at.
-# Then refresh the release report:  python3 scripts/g2f_tool.py raw-release
+# Writes OUT (default ../data/remote_copies.tsv; set it as remote_copy_table
+# in the top-level configuration): source_path, exists, size, mtime, checked_at.
+# Then refresh the release report:
+#   python3 scripts/g2f_tool.py raw-release --config <top-level config>
 set -euo pipefail
 cd "$(dirname "$0")/.."
-MANIFEST=${1:-../data/g2f_9genotypes_raw_reads_manifest.tsv}
-HOST=${2:-naj49@cbsublfs1.biohpc.cornell.edu}
+[[ $# -ge 2 ]] || { echo "usage: $0 MANIFEST USER@HOST [OUT]" >&2; exit 2; }
+MANIFEST=$1
+HOST=$2
 OUT=${3:-../data/remote_copies.tsv}
 [[ -f "$MANIFEST" ]] || { echo "manifest not found: $MANIFEST" >&2; exit 1; }
 paths=$(awk -F'\t' 'NR>1 && $6 ~ /^\// {print $6}' "$MANIFEST" | tr -d '\r')

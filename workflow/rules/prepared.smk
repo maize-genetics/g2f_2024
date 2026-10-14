@@ -5,7 +5,7 @@
 # (gzip integrity, MD5, record count) -> verify_prepared_inputs reconciles
 # runs, read counts, ONT length filtering and the manifest -> hifiasm.
 # Raw-copy deletion eligibility is reported separately and never acted on:
-#   python3 scripts/g2f_tool.py raw-release   (see docs/full_scale_run_plan.md)
+#   python3 scripts/g2f_tool.py raw-release   (see README, "All samples at full scale")
 
 
 def prepared_check_path(s, tech, iid):

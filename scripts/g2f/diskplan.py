@@ -1,7 +1,7 @@
 """Disk projection and start gate for the full-scale launcher.
 
 Estimates (bytes) per genotype come from its input sizes, using factors
-measured on PHBW8 (docs/full_scale_run_plan.md):
+measured on a ~2.3 Gb inbred maize genome (HiFi + ultra-long ONT):
   conv    converted HiFi FASTQ        1.1 x HiFi BAM bytes (0 for FASTQ/FASTA used in place)
   bins    hifiasm .bin intermediates  0.44 B per HiFi base + 13 GB (ONT index)
   mer     meryl DB + Merqury          0.30 B per HiFi base + 12 GB
@@ -12,7 +12,8 @@ measured on PHBW8 (docs/full_scale_run_plan.md):
   persist_keep = conv + mer + out + ont + pbi           (after, prepared HiFi FASTQ kept)
   persist_temp = mer + out + ont + pbi                  (after, FASTQ deleted after use)
 
-Gate for genotype g (all running genotypes' remaining growth is reserved):
+Gate for genotype g (never more than `jobs` genotypes running at once; all
+running genotypes' remaining growth is reserved):
   committed = sum over running r of max(0, (peak_r if r not yet assembled
               else persist_r) - measured usage of results/<r>)
   available = free - committed - reserve
@@ -122,7 +123,33 @@ def gate(state_dir, sample, results_dir, reserve, jobs, mode, free):
            "assembled": assembled(results_dir, sample)}
     d = decide(sample, est, free, running, pending, reserve, jobs, mode, own)
     d["running"] = sorted(running)
+    if len(running) >= jobs:
+        # Hard concurrency limit, independent of how the launcher schedules:
+        # never more than `jobs` genotypes running (1 = strictly sequential).
+        d["start"] = False
+        d["reason"] = f"{len(running)} genotype(s) already running, limit {jobs}"
     if d["start"]:
         with open(os.path.join(state_dir, f"{sample}.running"), "w") as fh:
             json.dump(d, fh, indent=2)
     return d
+
+
+def has_checkpoint(results_dir, sample):
+    """hifiasm error-correction checkpoint (<sample>.asm.ec.bin) left by an
+    interrupted attempt in any method directory."""
+    adir = os.path.join(results_dir, sample, "assembly")
+    if not os.path.isdir(adir):
+        return False
+    return any(os.path.exists(os.path.join(adir, m, f"{sample}.asm.ec.bin"))
+               for m in os.listdir(adir))
+
+
+def start_order(est, results_dir):
+    """Sequential start order that finishes assemblies soonest and exposes the
+    least work to an outage: (0) genotypes already assembled (QC only), then
+    (1) those with a hifiasm checkpoint to resume from, then (2) the rest by
+    estimated HiFi bases, smallest (shortest assembly) first."""
+    def key(s):
+        rank = 0 if assembled(results_dir, s) else 1 if has_checkpoint(results_dir, s) else 2
+        return (rank, est[s]["hifi_bases_est"], s)
+    return sorted(est, key=key)

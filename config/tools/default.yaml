@@ -1,0 +1,50 @@
+# Default tool commands: every tool is found on PATH (e.g. a conda/mamba
+# environment with hifiasm, seqkit, samtools, pbtk, meryl, merqury, busco and
+# sourmash). Computational environment only; never part of the science.
+# Each entry: the command prefix used by the workflow, and the command used
+# to report its version (recorded in provenance at execution time).
+#
+# For a site with containers or fixed install paths, copy this file (see
+# config/tools/biohpc.yaml for an Apptainer-based example) and select it with
+# `tools:` in the top-level configuration (config/local/config.yaml).
+
+tools:
+  hifiasm:
+    cmd: hifiasm
+    version_cmd: hifiasm --version
+  seqkit:
+    cmd: seqkit
+    version_cmd: seqkit version
+  samtools:
+    cmd: samtools
+    version_cmd: samtools --version | head -1
+  bam2fastq:
+    cmd: bam2fastq
+    version_cmd: bam2fastq --version | head -1
+  pbindex:
+    cmd: pbindex
+    version_cmd: pbindex --version | head -1
+  meryl:
+    cmd: meryl
+    version_cmd: meryl --version
+  # merqury.sh needs MERQURY set to the merqury install directory (conda
+  # activation sets it). Its internal meryl calls take no thread option; the
+  # workflow sets OMP_NUM_THREADS.
+  merqury:
+    cmd: merqury.sh
+    version_cmd: echo "merqury $(command -v merqury.sh)"
+  busco:
+    cmd: busco
+    version_cmd: busco --version | head -1
+  # Optional fingerprinting (scripts/g2f_fingerprint.py sketch): a Python 3
+  # interpreter with sourmash installed.
+  fingerprint_python:
+    cmd: python3
+    version_cmd: python3 -c "import sourmash; print('sourmash', sourmash.VERSION)"
+  md5sum:
+    cmd: md5sum
+    version_cmd: md5sum --version | head -1
+
+# Substituted into {containers} (relative to pipeline/); override in
+# config/local/local.yaml. Unused when no command refers to {containers}.
+containers_dir: ../containers
