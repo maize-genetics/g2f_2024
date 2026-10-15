@@ -175,8 +175,11 @@ files, or inputs that changed after results were built. See
 
 ## Running the pipeline
 
-Run every command from `pipeline/`. **Always dry-run first.** Long runs
-belong inside `screen` or `tmux`, so they survive a disconnect.
+Run every command from `pipeline/`. **Always dry-run first.** Start long
+runs in a detached `screen` (or `tmux`) session that runs only the job and
+closes when it ends, so the run survives a disconnect without leaving an
+idle shell behind; the log and exit-status files keep the result
+([docs/reference.md](docs/reference.md#running-all-samples)).
 
 ```bash
 # Dry run: list every job and its exact shell command; runs nothing
@@ -227,8 +230,8 @@ see `config/resources/large_node.yaml`.
 
 ```bash
 bash scripts/run_all_assemblies.sh --dry-run        # preflight + per-sample dry run
-# inside screen or tmux:
-bash scripts/run_all_assemblies.sh 2>&1 | tee ../logs/launcher.$(date +%Y%m%d_%H%M%S).out
+S=$(date +%Y%m%d_%H%M%S)                           # detached; the session ends with the run
+screen -dmS g2f_run bash -c "set -o pipefail; bash scripts/run_all_assemblies.sh 2>&1 | tee ../logs/launcher.$S.out; echo \$? > ../logs/launcher.$S.exit"
 bash scripts/run_status.sh                          # state of every sample, disk, CPU, memory
 ```
 

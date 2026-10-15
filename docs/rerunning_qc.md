@@ -62,7 +62,9 @@ without running any QC. All commands run from `pipeline/` with Snakemake on
    re-validated, because the heavy jobs depend on their validation inputs
    through `ancient()`.
 
-4. **Run it** (inside `screen`). Use the same target you dry-ran:
+4. **Run it** in a detached session that closes when Snakemake ends
+   (same pattern as docs/reference.md, Running all samples). Use the same
+   target you dry-ran:
    `imported_qc` for historical assemblies, or no target for workflow
    assemblies. If any workflow assembly is not finished yet, the run with no
    target also builds it; to avoid that, use the targeted form below.

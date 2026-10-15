@@ -177,12 +177,22 @@ one Snakemake process per sample. Its defaults come from the `launcher:`
 section of the top-level configuration; options override them
 (`bash scripts/run_all_assemblies.sh --help`).
 
-**Start** inside `screen` or `tmux`, after a dry run:
+**Start** after a dry run, in a detached session that runs only the
+launcher and closes by itself when the launcher ends, on success or failure:
 
 ```bash
 bash scripts/run_all_assemblies.sh --dry-run
-bash scripts/run_all_assemblies.sh 2>&1 | tee ../logs/launcher.$(date +%Y%m%d_%H%M%S).out
+S=$(date +%Y%m%d_%H%M%S)
+screen -dmS g2f_run bash -c "set -o pipefail; bash scripts/run_all_assemblies.sh 2>&1 | tee ../logs/launcher.$S.out; echo \$? > ../logs/launcher.$S.exit"
+screen -r g2f_run      # optional: watch it (detach with Ctrl-a d)
 ```
+
+The tmux equivalent is `tmux new-session -d -s g2f_run "<same command>"`.
+Do not add `; exec bash` or start an interactive session and type the
+command into it: that leaves an idle shell running after the job has
+finished. Everything needed afterwards is in files: `launcher.$S.out`, the
+exit status in `launcher.$S.exit` (absent = still running or killed), and
+the per-run directory `../logs/assembly_<stamp>/`.
 
 `--samples "A B C"` fixes the order; otherwise samples already assembled
 come first, then samples with hifiasm checkpoints, then the smallest HiFi

@@ -23,8 +23,10 @@
 #
 # Run from pipeline/. Review first:
 #   bash scripts/run_all_assemblies.sh --dry-run
-# Then start inside `screen` or `tmux` (docs/reference.md, Running all samples):
-#   bash scripts/run_all_assemblies.sh 2>&1 | tee ../logs/launcher.$(date +%Y%m%d_%H%M%S).out
+# Then start it in a detached session that closes when the launcher ends
+# (docs/reference.md, Running all samples):
+#   S=$(date +%Y%m%d_%H%M%S)
+#   screen -dmS g2f_run bash -c "set -o pipefail; bash scripts/run_all_assemblies.sh 2>&1 | tee ../logs/launcher.$S.out; echo \$? > ../logs/launcher.$S.exit"
 # Monitor:  bash scripts/run_status.sh
 #
 # Options:
