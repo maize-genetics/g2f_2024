@@ -1,0 +1,81 @@
+# Scientific parameters for assembly structural validation (scripts/g2f_asmqc.py).
+#
+# Portable defaults, version-controlled. Every validated stage records a hash
+# of the parameters it used; changing a value here makes affected results
+# "stale" and they are never overwritten silently. For a deliberate change,
+# also change `profile` in the run configuration so results go to a new
+# directory. Computational settings (threads, memory, CPU pinning) live in the
+# run configuration, never here.
+
+version: 1
+
+mapping:
+  # minimap2 preset for PacBio HiFi reads.
+  preset: map-hifi
+  # No secondary alignments; soft-clip supplementary alignments so their
+  # clipping is visible; MD tag for mismatch counting.
+  extra_args: ["--secondary=no", "-Y", "--MD"]
+  # Reads are streamed as FASTA (no base qualities): not needed for the
+  # depth / clipping / mismatch analyses and ~3x smaller alignments.
+  drop_base_qualities: true
+
+read_support:
+  window: 10000            # bp; summary window
+  chunk: 5000000           # bp; unit of parallel work (multiple of window)
+  min_mapq: 10             # "unique" alignments
+  clip_min: 500            # bp; soft/hard clip counted as a breakpoint signal
+  cluster_dist: 100        # bp; clip events closer than this form one cluster
+  min_cluster_reads: 3     # clip clusters with fewer events are not reported
+  end_margin: 20000        # bp; clips this close to a contig end are expected
+  span_flank: 1000         # bp; a read "spans" a position with this much on each side
+  het_min_depth: 10        # min MAPQ>=min_mapq depth to test a position
+  het_min_alt: 3           # min reads disagreeing with the assembly base
+  het_frac: [0.2, 0.8]     # disagreeing fraction counted as a mixed (het-like) site
+  error_frac: 0.8          # disagreeing fraction counted as a likely consensus error
+
+regions:
+  # Expected single-copy read depth: "auto" = mode of the per-base depth
+  # histogram (cross-checked against the k-mer peak if given), or a number.
+  expected_depth: auto
+  # Window depth / expected depth class boundaries.
+  depth_classes:
+    none: 0.15
+    low: 0.30
+    half_max: 0.70
+    normal_max: 1.40
+    dup_max: 2.50
+  mq0_high: 0.5            # fraction of depth from MAPQ < min_mapq => multi-mapping
+  het_enriched: 3.0        # mixed-site density relative to the genome median
+  merge_gap_windows: 1     # windows of other classes allowed inside a region
+  breakpoint:
+    min_clip_reads: 5
+    high_clip_frac: 0.3    # clipped reads / expected depth
+    high_max_span_frac: 0.1  # spanning reads / expected depth
+    het_sv_span_frac: [0.3, 0.7]  # spanned by about half the reads => allelic SV
+
+ref_align:
+  preset: asm20            # inbred maize vs B73 diverges well beyond asm5
+  min_mapq: 10
+  min_block_len: 10000     # alignments used for structure calls
+  plot_min_len: 5000       # alignments drawn in dot plots
+  synteny_merge_gap: 1000000   # bp on the reference; merge collinear alignments
+  min_segment_len: 500000      # synteny segment length (query) to call a junction
+  multi_chr_min_bp: 1000000    # second chromosome needs this much alignment...
+  multi_chr_min_frac: 0.10     # ...and this fraction of the contig's aligned bp
+  ref_jump: 5000000            # same chromosome, same strand, jump > this = rearrangement
+  coverage_bin: 1000000        # reference coverage track bin
+  min_absent_bins: 3           # consecutive uncovered bins reported as absent
+
+pair_align:
+  preset: asm5             # same reads, same assembler: near-identical sequence
+  min_aln_len: 5000
+  near_identical: 0.999    # redundant copy at or above this identity = near-identical duplicate
+
+graph:
+  neighborhood_radius: 3   # graph hops around a candidate
+  max_nodes: 80
+  top_candidates: 30       # candidates per assembly with a rendered neighborhood
+
+evidence:
+  junction_flank: 5000     # bp added around reference-alignment junctions
+  junction_step: 500       # bp between positions tested for read continuity

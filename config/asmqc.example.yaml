@@ -1,0 +1,67 @@
+# Assembly validation run configuration (template; scripts/g2f_asmqc.py).
+#
+# Copy to config/local/asmqc.yaml (untracked) and edit. Relative paths are
+# resolved against the pipeline/ directory. Input files are only read; every
+# output goes under <outdir>/<profile>/.
+
+# Output namespace. Change it when you change scientific parameters on
+# purpose, so earlier results stay where they are.
+profile: asmqc_v1
+outdir: ../asm_validation
+tmpdir: ../tmp/asmqc            # large temporary files (alignment sorting); not /tmp
+
+# Scientific parameters (version-controlled defaults) and optional overrides.
+science: config/asmqc_science.yaml
+# science_overrides:
+#   read_support: {window: 5000}
+
+# Tool commands. Default: minimap2, samtools, seqkit on PATH. A site file can
+# set fixed install paths, e.g. tools_file: config/tools/asmqc_biohpc.yaml
+# tools_file: config/tools/asmqc_biohpc.yaml
+
+# Computational settings only (never change results).
+resources:
+  threads: 32                   # minimap2 threads and parallel analysis workers
+  cpus: ""                      # optional taskset CPU list, e.g. "64-95"
+  nice: 10
+  sort_threads: 8
+  sort_mem_per_thread: 4G
+  reserve_disk_gb: 200          # free disk that must remain after a stage's estimate
+  min_free_ram_gb: 100          # for whole-genome alignment stages
+  alignment_format: cram        # cram (small; needs the assembly FASTA) or bam
+
+# Reference genomes for synteny and dot plots (optional, any number).
+references:
+  REF1:
+    fasta: /path/to/reference.fa        # plain or bgzip + .fai + .gzi
+    label: Reference v1
+    chromosomes_regex: '^chr\d+$'      # sequences treated as chromosomes
+
+# Optional project table of existing QC metrics (TSV); each assembly selects
+# its row with existing_metrics (column: value pairs).
+# existing_metrics_tsv: /path/to/metrics.tsv
+
+samples:
+  SAMPLE_A:
+    hifi_reads: [/path/to/SAMPLE_A.hifi.fastq.gz]
+    hifi_read_count: 1000000      # optional: primary alignment records must equal this
+    kmer_peak: 30                 # optional: cross-check of the read-depth mode
+    expected_depth: auto          # or a number (single-copy read depth)
+    assemblies:
+      unpurged:
+        label: "-l0"
+        method_id: assembler-1.0_settingA
+        fasta: /path/to/SAMPLE_A.unpurged.p_ctg.fa
+        assembler_log: /path/to/SAMPLE_A.unpurged.stderr.log     # optional
+        ctg_gfa: /path/to/SAMPLE_A.unpurged.bp.p_ctg.noseq.gfa   # optional, hifiasm
+        utg_gfa: /path/to/SAMPLE_A.unpurged.bp.p_utg.noseq.gfa   # optional, hifiasm
+        # existing_metrics: {sample: SAMPLE_A, setting: "-l0"}
+      purged:
+        label: "-l3"
+        method_id: assembler-1.0_settingB
+        fasta: /path/to/SAMPLE_A.purged.p_ctg.fa
+        extra_targets:                # other outputs of this run (e.g. hap1/hap2)
+          - /path/to/SAMPLE_A.purged.hap1.p_ctg.fa
+          - /path/to/SAMPLE_A.purged.hap2.p_ctg.fa
+    pairs:
+      - {a: unpurged, b: purged}      # classify a's sequence against b (and b's extra_targets)

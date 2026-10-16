@@ -5,8 +5,14 @@
 # On BioHPC, Snakemake 9 and PyYAML come from the Python 3.12 module.
 set -euo pipefail
 cd "$(dirname "$0")"
+# Assembly-validation tests need numpy/pysam/matplotlib (BioHPC: the default python3, before the module).
+ASMQC_PY=${ASMQC_PYTHON:-$(command -v python3)}
 if command -v module >/dev/null 2>&1; then module load python/3.12.7 >/dev/null 2>&1 || true; fi
 export TMPDIR="${TMPDIR:-$(realpath -m ../../tmp)}"   # the project tmp/ (not the shared /tmp)
 mkdir -p "$TMPDIR"
 if [[ $# -eq 0 ]]; then set -- test_discovery test_units test_workflow test_fingerprint test_realtools; fi
+if [[ $# -eq 1 && $1 == test_asmqc ]]; then exec "$ASMQC_PY" -m unittest -v test_asmqc; fi
 python3 -m unittest -v "$@"
+if [[ " $* " == *" test_units "* && " $* " == *" test_realtools "* ]]; then  # the full default suite
+    "$ASMQC_PY" -m unittest -v test_asmqc
+fi
