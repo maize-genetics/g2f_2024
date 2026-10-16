@@ -109,6 +109,11 @@ def cmd_run(cfg, st, sids, ctx, rerun_stale, keep_going):
         fcntl.flock(lockfh, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         sys.exit(f"another g2f_asmqc run holds {cfg['root']}/.runner.lock")
+    # the runner's own Python work (analysis stages) gets the same niceness and CPUs as external tools
+    if ctx.res.get("nice"):
+        os.nice(int(ctx.res["nice"]))
+    if ctx.res.get("cpus"):
+        os.sched_setaffinity(0, S._cpu_list(ctx.res["cpus"]))
     print(f"run start {runner.now()} pid {os.getpid()} git {runner.git_commit(ctx.pipeline_dir)}", flush=True)
     failed, n_done = set(), 0
     for sid in sids:
