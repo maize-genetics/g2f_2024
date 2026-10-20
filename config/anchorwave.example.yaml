@@ -1,0 +1,42 @@
+# Example run configuration for scripts/g2f_anchorwave.py. Copy to config/local/
+# (untracked) and fill in real paths. All paths absolute.
+profile: anchorwave_v1
+outdir: /path/to/results/asm_validation        # results go to <outdir>/<profile>/
+tmpdir: /path/to/tmp/anchorwave                 # large scratch; not /tmp
+science: config/anchorwave_science.yaml
+
+runtime:
+  apptainer: apptainer
+  image: /path/to/containers/anchorwave-1.3.1--h5814d7d_0.sif   # quay.io/biocontainers/anchorwave:1.3.1--h5814d7d_0
+  bind: [/path/to/project]                       # every input/output path must be under a bind
+  expect:                                        # optional: refuse to run if the runtime differs
+    anchorwave: anchorwave v1.3.1
+    minimap2: 2.31-r1302
+
+resources:
+  threads: 16
+  cpus: "0-15"              # taskset CPU list
+  nice: 10
+  anchorwave_mem_gib: 120   # proali -M (predictive envelope, not a hard cap; >= w^2 = 9.3 GiB)
+  max_rss_gb: 160           # per-command memory limit (GB): hard cap if memory_cap is set, and the watchdog limit
+  memory_cap: systemd-scope # kernel-enforced MemoryMax via a systemd user scope (fails closed if unavailable);
+                            # 'none' = watchdog only (samples every 10 s, can miss short spikes)
+  min_free_ram_gb: 32       # watchdog/preflight: system MemAvailable floor
+  reserve_disk_gb: 100      # preflight: free disk that must remain after the estimate
+  max_cpu_busy_frac: 0.2    # preflight: refuse if the chosen CPUs are busier than this
+
+reference:
+  id: REF
+  fasta: /path/to/reference.fa                   # uncompressed, samtools faidx-indexed
+  gff3: /path/to/reference.gff3.gz
+  fasta_md5: null                                # optional expected checksums, verified in ref_cds
+  gff3_md5: null
+
+samples:
+  SAMPLE_A:
+    assemblies:
+      unpurged:
+        fasta: /path/to/SAMPLE_A.p_ctg.fa        # uncompressed, faidx-indexed
+        expected_sha256: null                    # optional
+        expected_contigs: null
+        expected_bp: null

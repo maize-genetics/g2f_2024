@@ -12,7 +12,10 @@ export TMPDIR="${TMPDIR:-$(realpath -m ../../tmp)}"   # the project tmp/ (not th
 mkdir -p "$TMPDIR"
 if [[ $# -eq 0 ]]; then set -- test_discovery test_units test_workflow test_fingerprint test_realtools; fi
 if [[ $# -eq 1 && $1 == test_asmqc ]]; then exec "$ASMQC_PY" -m unittest -v test_asmqc; fi
+# AnchorWave tests: the container tests run only when ANCHORWAVE_IMAGE names the .sif image.
+if [[ $# -eq 1 && $1 == test_anchorwave ]]; then exec "$ASMQC_PY" -m unittest -v test_anchorwave; fi
 python3 -m unittest -v "$@"
 if [[ " $* " == *" test_units "* && " $* " == *" test_realtools "* ]]; then  # the full default suite
     "$ASMQC_PY" -m unittest -v test_asmqc
+    "$ASMQC_PY" -m unittest -v test_anchorwave
 fi

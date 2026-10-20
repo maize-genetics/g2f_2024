@@ -1,0 +1,43 @@
+# Scientific parameters for gene-anchored genome alignment (scripts/g2f_anchorwave.py).
+# Resource settings (threads, CPUs, memory limits) belong in the run configuration, not here.
+# Changing anything here changes the params hash of the affected stages: their
+# results become "stale" and are rerun only with --rerun-stale (old results kept).
+version: 1
+
+# anchorwave gff2seq: longest full-length CDS per gene; -m must equal proali -m.
+gff2seq:
+  min_exon: 20            # AnchorWave default; drops very short CDS that minimap2 places poorly
+
+# CDS -> genome lift-over, as documented by AnchorWave for minimap2.
+minimap2:
+  args: "-x splice -k 12 -a -p 0.4 -N 20"
+
+proali:
+  # AnchorWave defaults are kept for everything not listed (-mi 0.95, -y 0.6, chain -d/-O/-E/-I/-D).
+  common_args: []
+  # -R: maximum alignment depth of each REFERENCE position (README: maize reference,
+  #     sorghum query -> "-R 1 -Q 2" because each sorghum region matches two maize regions).
+  # -Q: maximum alignment depth of each QUERY position.
+  # -e: maximum expected copies of one gene on one query sequence (tandem-duplicate guard).
+  # args: further proali options for one variant (e.g. chain parameters -D/-I).
+  # Query = contig assembly, reference = haploid reference genome.
+  variants:
+    R1Q1e1: {R: 1, Q: 1, e: 1}   # strict one-to-one: what a single haploid copy per locus would give
+    R2Q1e1: {R: 2, Q: 1, e: 1}   # BASELINE: a reference locus may be matched by two assembly copies
+                                 # (both alleles kept in an unpurged primary, or primary + duplicate)
+    R3Q1e1: {R: 3, Q: 1, e: 1}   # capacity probe: are there loci with >2 collinear copies?
+    R2Q1e2: {R: 2, Q: 1, e: 2}   # allows two copies of a gene on ONE query contig (tandem/same-contig duplication)
+    R2Q1e1D5: {R: 2, Q: 1, e: 1, args: ["-D", "5"]}
+                                 # small-rearrangement screen: the chain may skip at most 5 anchors.
+                                 # With the default -D 25 an inversion of < ~25 genes is bridged by the
+                                 # surrounding collinear block and not reported (verified on synthetic
+                                 # data, tests/test_anchorwave.py); a small -D also splits blocks at
+                                 # presence/absence-variable gene clusters, so its extra breaks are
+                                 # candidates, not rearrangements.
+  # Variants that also get base-level alignment (MAF). Anchor-only variants are cheap (minutes).
+  align_variants: [R2Q1e1]
+  align_args: []                 # e.g. ["-w", "100000", "-fa3", "50000"] (AnchorWave 1.3 defaults)
+
+validation:
+  min_ref_self_placement: 0.90   # fraction of CDS whose primary hit in the reference is their own locus
+  min_query_mapped: 0.80         # fraction of CDS with any alignment to the query assembly
