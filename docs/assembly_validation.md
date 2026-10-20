@@ -46,10 +46,20 @@ independent evidence types.
 | `low_support` | little or no read support |
 | `unresolved` | conflicting signals, or a repeat longer than the reads at the site |
 
-Depth classes are relative to the expected single-copy depth *c* (the
-depth-histogram mode, cross-checked against the k-mer peak, or set
-explicitly): `none` < 0.15c ≤ `low` < 0.30c ≤ `half` < 0.70c ≤ `normal` <
-1.40c ≤ `dup` < 2.50c ≤ `multi`.
+Depth classes are relative to one depth baseline *c* per sample: the depth
+of sequence represented once in the assembly that receives the reads of both
+haplotypes (homozygous regions, or heterozygous regions collapsed to one
+allele), i.e. hifiasm's `peak_hom` / the homozygous k-mer peak. The same *c*
+applies to every assembly of the sample; it is not each assembly's depth mode.
+In an unpurged assembly of a heterozygous sample, separately kept alleles are
+expected at about c/2 (`half`). Classes: `none` < 0.15c ≤ `low` < 0.30c ≤
+`half` < 0.70c ≤ `normal` < 1.40c ≤ `dup` < 2.50c ≤ `multi`.
+
+`expected_depth: auto` uses the read-depth mode only if it agrees with
+`kmer_peak` within 15%; otherwise (or without `kmer_peak`) the `regions`
+stage fails with a calibration error instead of classifying. Set a numeric
+`expected_depth` (normally the k-mer peak) for samples whose unpurged
+assemblies keep both alleles.
 
 Graph depth classes use the hifiasm `rd` tag relative to hifiasm's own
 homozygous peak (`peak_hom` in its log), not the `rd` mode: in a sample that is

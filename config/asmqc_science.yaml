@@ -34,8 +34,10 @@ read_support:
   error_frac: 0.8          # disagreeing fraction counted as a likely consensus error
 
 regions:
-  # Expected single-copy read depth: "auto" = mode of the per-base depth
-  # histogram (cross-checked against the k-mer peak if given), or a number.
+  # Depth baseline c: depth of sequence represented once with reads of both
+  # haplotypes (homozygous depth, = hifiasm peak_hom), shared by all assemblies
+  # of a sample. "auto" = per-base depth mode, accepted only within 15% of the
+  # sample's kmer_peak (else the regions stage fails), or a number.
   expected_depth: auto
   # Window depth / expected depth class boundaries.
   depth_classes:

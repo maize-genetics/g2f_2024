@@ -18,7 +18,7 @@ from .runner import readtext, stage_state
 from .stages import asm_dir, pair_dir
 
 LIMITATIONS = [
-    "Read-depth classes are relative to one expected single-copy depth; GC- or repeat-related coverage bias "
+    "Read-depth classes are relative to one depth baseline c (homozygous / collapsed-haplotype depth, shared by all assemblies of a sample); GC- or repeat-related coverage bias "
     "can mimic low support or collapse.",
     "HiFi reads (N50 typically 13-20 kb) cannot span maize LTR-retrotransposon arrays and long tandem repeats; "
     "breakpoints and low continuity inside such repeats are reported as unresolved, not as errors.",
@@ -100,7 +100,7 @@ def collect(cfg, stages, sname):
             add(lab, "read support", "supplementary alignments", v["supplementary"], "map_hifi flagstat")
         if _validated(cfg, stages, f"regions:{sname}:{aname}"):
             r = _load(os.path.join(asm_dir(cfg, sname, aname, "regions"), "summary.json"))
-            add(lab, "read support", "expected single-copy depth", r["expected_depth"], r["expected_depth_source"])
+            add(lab, "read support", "depth baseline c (homozygous depth)", r["expected_depth"], r["expected_depth_source"])
             for k, v in r["class_bp"].items():
                 add(lab, "read depth class (bp)", k, v, "regions/window_classes")
             add(lab, "read support", "multi-mapping windows (bp)", r["multimapping_bp"], "regions")

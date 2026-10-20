@@ -45,8 +45,8 @@ samples:
   SAMPLE_A:
     hifi_reads: [/path/to/SAMPLE_A.hifi.fastq.gz]
     hifi_read_count: 1000000      # optional: primary alignment records must equal this
-    kmer_peak: 30                 # optional: cross-check of the read-depth mode
-    expected_depth: auto          # or a number (single-copy read depth)
+    kmer_peak: 30                 # homozygous k-mer peak / hifiasm peak_hom (required for expected_depth: auto)
+    expected_depth: auto          # or a number: homozygous depth, shared by all assemblies of the sample
     assemblies:
       unpurged:
         label: "-l0"

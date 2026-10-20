@@ -1,8 +1,13 @@
 """Classify read-support windows and clip clusters into candidate regions.
 
 Every call is a candidate with its evidence and a confidence level, never a
-confirmed error. Read depth is expressed relative to the expected single-copy
-depth c:
+confirmed error. Read depth is expressed relative to one depth baseline c per
+sample: the depth of sequence represented once in the assembly that receives the
+reads of both haplotypes (homozygous regions, or heterozygous regions collapsed
+to one allele). This is hifiasm's peak_hom / the homozygous k-mer peak, the same
+for every assembly of the sample. It is NOT the modal depth of each assembly:
+in an unpurged assembly of a heterozygous sample both alleles are kept, each
+receives about c/2, and the depth mode is then the one-allele peak.
 
   none / low   (< 0.15c / < 0.30c)  weak support: possible erroneous sequence,
                                      or a coverage bias
@@ -28,17 +33,42 @@ import numpy as np
 CLASSES = ["none", "low", "half", "normal", "dup", "multi"]
 
 
-def expected_depth(setting, hist_mode, kmer_peak=None):
-    """Resolve the single-copy depth; returns (value, source, warning)."""
+class CalibrationError(ValueError):
+    """The depth baseline cannot be resolved safely; the stage must not classify."""
+
+
+def expected_depth(setting, hist_mode, kmer_peak=None, tolerance=0.15):
+    """Resolve the depth baseline c; returns (value, source, warning).
+
+    A number is used as given (warning if it differs from the k-mer peak).
+    "auto" takes the read-depth histogram mode only after checking it against
+    the k-mer peak; it raises CalibrationError when no k-mer peak is given or the
+    mode differs from it by more than `tolerance` (e.g. a mode at half the k-mer
+    peak in an assembly that keeps both alleles). Classifying against an
+    unverified baseline would mislabel whole depth classes.
+    """
     warn = ""
     if setting not in (None, "auto"):
-        return float(setting), "configured", warn
+        c = float(setting)
+        if c <= 0:
+            raise CalibrationError(f"expected_depth must be positive, got {setting!r}")
+        if kmer_peak and abs(c - kmer_peak) / kmer_peak > tolerance:
+            warn = f"configured expected_depth {c:g} differs from k-mer peak {kmer_peak} by more than {tolerance:.0%}"
+        return c, "configured", warn
     c = float(hist_mode)
-    if kmer_peak:
-        if abs(c - kmer_peak) / kmer_peak > 0.15:
-            warn = (f"read-depth mode {c:.1f} differs from k-mer peak {kmer_peak} by more than 15%; "
-                    "set expected_depth explicitly if the mode is a haploid or duplicated peak")
-    return c, "depth-histogram mode", warn
+    if not kmer_peak:
+        raise CalibrationError(
+            f"expected_depth is 'auto' but no kmer_peak is configured to verify the read-depth mode ({c:g}); "
+            "set kmer_peak (hifiasm peak_hom or the homozygous k-mer peak) or a numeric expected_depth")
+    if abs(c - kmer_peak) / kmer_peak > tolerance:
+        hint = (" The mode is close to half the k-mer peak: the assembly probably keeps both alleles of "
+                "heterozygous regions, so the mode is the one-allele depth." if abs(c / kmer_peak - 0.5) <= tolerance / 2
+                else "")
+        raise CalibrationError(
+            f"read-depth mode {c:g} differs from k-mer peak {kmer_peak} by more than {tolerance:.0%}.{hint} "
+            f"Set expected_depth to the shared homozygous depth (normally {kmer_peak}) for every assembly of "
+            "the sample, or correct kmer_peak.")
+    return c, "depth-histogram mode (checked against k-mer peak)", warn
 
 
 def depth_class(ratio, b):

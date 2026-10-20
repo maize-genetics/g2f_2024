@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 
+import numpy as np
 import yaml
 
 PIPELINE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -72,11 +73,49 @@ class Units(unittest.TestCase):
         self.assertEqual([regions.depth_class(x, b) for x in (0.1, 0.2, 0.5, 1.0, 2.0, 3.0)],
                          ["none", "low", "half", "normal", "dup", "multi"])
 
-    def test_expected_depth_warns_on_kmer_mismatch(self):
-        c, src, warn = regions.expected_depth("auto", 17, kmer_peak=34)
-        self.assertEqual(c, 17.0)
+    def test_auto_depth_fails_on_one_allele_mode(self):
+        # regression: an unpurged assembly of a heterozygous sample has its depth mode at the one-allele
+        # peak (17) while the homozygous peak is 34; auto must refuse rather than classify against 17
+        with self.assertRaises(regions.CalibrationError) as cm:
+            regions.expected_depth("auto", 17, kmer_peak=34)
+        self.assertIn("half the k-mer peak", str(cm.exception))
+        with self.assertRaises(regions.CalibrationError):
+            regions.expected_depth("auto", 45, kmer_peak=34)  # any >15% mismatch, not only half
+        with self.assertRaises(regions.CalibrationError):
+            regions.expected_depth("auto", 34, kmer_peak=None)  # unverifiable
+        with self.assertRaises(regions.CalibrationError):
+            regions.expected_depth(0, 34, kmer_peak=34)
+
+    def test_auto_depth_accepts_matching_mode(self):
+        c, src, warn = regions.expected_depth("auto", 33, kmer_peak=34)
+        self.assertEqual((c, warn), (33.0, ""))
+        self.assertIn("checked", src)
+
+    def test_configured_depth_is_shared_baseline(self):
+        # the configured baseline is used as given, whatever the assembly's own mode is
+        self.assertEqual(regions.expected_depth(34, 17, kmer_peak=34), (34.0, "configured", ""))
+        c, src, warn = regions.expected_depth(20, 17, kmer_peak=34)
+        self.assertEqual(c, 20.0)
         self.assertIn("differs", warn)
-        self.assertEqual(regions.expected_depth(30, 17)[0], 30.0)
+
+    def test_shared_baseline_classes_unpurged_and_purged(self):
+        sci = {"regions": {"depth_classes": {"none": 0.15, "low": 0.3, "half_max": 0.7, "normal_max": 1.4,
+                                             "dup_max": 2.5}}}
+
+        def classes(depths, c):
+            n = len(depths)
+            w = {"depth_all": np.array(depths, float), "depth_hq": np.array(depths, float),
+                 "tested_bp": np.ones(n), "mixed_sites": np.zeros(n)}
+            return list(regions.classify_windows(w, c, sci)[1])
+
+        # unpurged: separately kept alleles at ~17x, homozygous sequence at ~33x, a true collapse at 68x
+        unpurged = [17, 16, 18, 17, 33, 34, 32, 68]
+        # purged: alleles collapsed to one copy (both haplotypes' reads) at ~34x, one kept allele pair at 17x
+        purged = [34, 31, 35, 33, 17, 68]
+        self.assertEqual(classes(unpurged, 34.0), ["half"] * 4 + ["normal"] * 3 + ["dup"])
+        self.assertEqual(classes(purged, 34.0), ["normal"] * 4 + ["half", "dup"])
+        # the defect being prevented: the unpurged mode (17) as baseline turns homozygous sequence into 'dup'
+        self.assertEqual(classes(unpurged, 17.0)[4:7], ["dup"] * 3)
 
     def test_best_copy_pieces(self):
         alns = [{"q": "x", "t": "T", "ts": 0, "te": 100, "identity": 1.0, "alen": 100},
@@ -305,6 +344,53 @@ class RunnerSafety(unittest.TestCase):
         self.assertEqual(rc, 0)
         prep = os.path.join(self.d, "out", "test_v1", "samples", "SAMPLE_A", "purged")
         self.assertTrue([x for x in os.listdir(prep) if x.startswith("prepare.previous-")])
+
+    def test_depth_calibration_fails_closed_then_reruns_only_downstream(self):
+        root = os.path.join(self.d, "out", "test_v1", "samples", "SAMPLE_A")
+
+        def setting(expected, kmer):
+            def f(c):
+                c["samples"]["SAMPLE_A"]["expected_depth"] = expected
+                c["samples"]["SAMPLE_A"]["kmer_peak"] = kmer
+            return write_config(self.d, self.paths, f)
+
+        # auto without a k-mer peak: regions refuses to classify, the failure is recorded
+        cfg = setting("auto", None)
+        rc, out = run_cli("-c", cfg, "run", "--stages", "prepare,map_hifi,read_support,regions")
+        self.assertEqual(rc, 1, out)
+        with open(os.path.join(root, "purged", "regions.partial", "FAILED.json")) as fh:
+            failed = json.load(fh)
+        self.assertIn("CalibrationError", failed["error"])
+        self.assertFalse(os.path.exists(os.path.join(root, "purged", "regions", "VALIDATED.json")))
+        m = json.load(open(os.path.join(root, "unpurged", "read_support", "summary.json")))["depth_mode_all"]
+
+        # auto with the read-depth mode at half the k-mer peak (the 17x vs 34x case)
+        cfg = setting("auto", 2 * m)
+        rc, out = run_cli("-c", cfg, "run", "--stages", "regions")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("half the k-mer peak", out)
+
+        # explicit shared baseline: everything validates; the failed attempts are kept
+        cfg = setting(2 * m, 2 * m)
+        rc, out = run_cli("-c", cfg, "run")
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("[run ] map_hifi", out)  # validated alignments are reused
+        self.assertTrue([x for x in os.listdir(os.path.join(root, "purged")) if x.startswith("regions.attempt-")])
+        for a in ("purged", "unpurged"):
+            s = json.load(open(os.path.join(root, a, "regions", "summary.json")))
+            self.assertEqual((s["expected_depth"], s["expected_depth_source"]), (2.0 * m, "configured"))
+
+        # changing the baseline makes regions stale by parameters; its dependants follow by input signature
+        # once regions is rerun (status does not propagate upstream staleness)
+        cfg = setting(m, 2 * m)
+        rc, out = run_cli("-c", cfg, "status")
+        stale = {l.split()[1] for l in out.splitlines() if l.split()[:1] == ["stale"]}
+        self.assertEqual({x.split(":")[0] for x in stale}, {"regions"}, out)
+        rc, out = run_cli("-c", cfg, "run", "--rerun-stale")
+        self.assertEqual(rc, 0, out)
+        ran = {l.split()[2].split(":")[0] for l in out.splitlines() if l.startswith("[run ]")}
+        self.assertEqual(ran, {"regions", "evidence", "pair_analysis"}, out)
+        self.assertTrue([x for x in os.listdir(os.path.join(root, "purged")) if x.startswith("regions.previous-")])
 
     def test_wrong_read_count_fails_validation(self):
         def wrong(c):
