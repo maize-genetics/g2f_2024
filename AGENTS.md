@@ -80,6 +80,7 @@ Do not waste context polling or tailing logs.
 - config/: portable parameters, defaults and *.example.yaml
   templates; project-specific files are untracked
 - config/local/: untracked machine and project settings
+- config/workflow_stages.yaml: machine-readable stage index
 - scripts/: version-controlled executable utilities
 - workflow/: reproducible workflow definitions
 - profiles/: optional execution profiles (e.g. BioHPC)
@@ -88,6 +89,58 @@ Do not waste context polling or tailing logs.
 - ../project_records/ (outside the repository, never in Git):
   scientific decisions, run plans, audits, incidents, QC
   reports, fingerprinting results, provenance notes
+
+## Discovering and running the workflow
+- Start with docs/workflow_guide.md: what each stage of the process does (inputs and identity → reads → k-mers →
+  assembly → QC → structural validation → correction → selection → release), its entry point, and its gate.
+- config/workflow_stages.yaml is the machine-readable index. Each stage has a `status`:
+  - `workflow` / `tool`: code in this repository;
+  - `project_script`: executed in a project, not yet packaged here;
+  - `manual`: a human decision;
+  - `planned`: not implemented.
+
+  Do not present a `project_script` or `manual` stage as automated.
+- Snakemake stages: always `--dry-run --printshellcmds` first, and show the researcher the plan. CLI tools: run
+  `--help`, then `plan` / `check-env` / `status` where they exist, before any `run`.
+- To learn what a past result came from, read its provenance JSON (schema `g2f-provenance/1`), or tabulate many with
+  `scripts/g2f_provenance_report.py`. For tools with staged outputs, read `VALIDATED.json`.
+- A project's history, decisions and evidence live in `../project_records/`. Read its workflow record before
+  re-deriving anything.
+
+## Validation expectations
+- **A result exists only when its validation marker exists.** That is `*.validated.*.json` (workflow) or
+  `VALIDATED.json` (tools), not the output file.
+- **Every new script ships with a synthetic test** under tests/ and is registered in config/workflow_stages.yaml.
+  `tests/test_workflow_stages.py` checks that the registry matches the code.
+- **Run `bash tests/run_tests.sh`** (synthetic data, a few minutes) before committing code changes.
+- **A derived file must be verified independently of the code that made it.** Derived files include a renamed,
+  reordered or split FASTA. The verification is a separate pass that re-reads the source and the output. It compares
+  per-record sequence hashes, IDs (each exactly once), lengths and totals.
+
+## Release rules
+- **Releases are immutable.** Never edit, regenerate or delete a file in an existing release directory.
+  - Any change, including names or record order, goes into a new versioned directory.
+  - Its README states exactly what changed and what did not.
+- **Before and after building a derived release,** re-verify the source release (its checksum file and a tree
+  snapshot) and record the result inside the new release.
+- **Every release has an authoritative manifest** (one FASTA per unit, with path, sha256, record count, bp and
+  source) and a checksum file. Make the files read-only after validation.
+- **Identifier and order conventions** do not imply scaffolding. Contigs that may be alternative alleles are flagged
+  in metadata and never silently removed. See docs/workflow_guide.md, stage 8.
+
+## Decisions that require a human
+Agents prepare evidence tables. They never make these decisions or encode them as defaults:
+- **Assembly strategy for a heterozygous or mixed sample:** purge level, haplotype pair vs primary, coverage overrides,
+  and which reads represent the sample.
+- **Structural edits:** whether to break or split a join. The two cases are reads CONTRADICT the join, or the join is
+  read-untestable at a known artefact.
+- **Selection of a deliverable when QC metrics conflict**, and reporting an unexplained check failure as unexplained.
+- **Promotion of a build to a release**, release approval, and anything sent to collaborators.
+
+Keep three things separate:
+- technical validation (checksums, file contracts);
+- scientific QC (is the assembly good?);
+- collaborator approval.
 
 ## Repository hygiene (Git policy)
 GitHub distributes reusable software. It does not document

@@ -386,6 +386,9 @@ that has already been used is refused.
 
 | Document | Contents |
 |---|---|
+| [docs/workflow_guide.md](docs/workflow_guide.md) | **The whole process, reads to release.** Covers every stage beyond the Snakemake part: heterozygosity and strategy, structural validation and correction, selection, release naming, ordering and checksums, and annotation handoff. It states what is automated and what needs a human. Index: [config/workflow_stages.yaml](config/workflow_stages.yaml) |
+| [docs/assembly_validation.md](docs/assembly_validation.md) | Read support, depth classes, graph and sequence-fate validation (`scripts/g2f_asmqc.py`) |
+| [docs/anchorwave.md](docs/anchorwave.md) | Gene-anchored synteny to a reference (`scripts/g2f_anchorwave.py`) |
 | [docs/reference.md](docs/reference.md) | Input rules, resources, full output list, running all samples, rerun and safety rules, error messages |
 | [docs/rerunning_qc.md](docs/rerunning_qc.md) | Rerunning BUSCO, Merqury and statistics independently |
 | [docs/fingerprinting.md](docs/fingerprinting.md) | Optional k-mer genotype fingerprinting: method, calibration, outputs |
@@ -400,7 +403,10 @@ config/     config.yaml (portable defaults), science.yaml, methods/ (immutable),
             fingerprint*.yaml, resources/, tools/, *.example.yaml, local/ (untracked)
 workflow/   Snakefile and rules/*.smk
 scripts/    g2f_tool.py and g2f_fingerprint.py command-line helpers, the g2f/ Python package,
-            run_all_assemblies.sh (full-scale launcher), run_status.sh
+            run_all_assemblies.sh (full-scale launcher), run_status.sh,
+            g2f_asmqc.py / g2f_anchorwave*.py / g2f_breakpoint_reads.py (structural validation),
+            g2f_release_fasta.py (reorder + verify release FASTAs), g2f_genecad_input_check.py
+            (annotation input gate), g2f_provenance_report.py (provenance table)
 profiles/   Snakemake execution profiles (local = default; biohpc = optional)
 tests/      unit, fixture, dry-run and stub end-to-end tests (synthetic data only)
 docs/       user documentation

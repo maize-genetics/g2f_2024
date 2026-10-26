@@ -1,0 +1,183 @@
+# Machine-readable index of workflow stages (documentation registry; nothing executes from this file).
+# Human-readable guide: docs/workflow_guide.md. Kept in sync by tests/test_workflow_stages.py:
+# every `entry` script must exist, and every Snakemake `rules` name must be defined in workflow/rules/*.smk.
+#
+# status: workflow       Snakemake rule(s); resumable, validated outputs, provenance JSON per step
+#         tool           tracked CLI in scripts/ with tests
+#         project_script executed in a project but not yet packaged in this repository (promote before reuse)
+#         manual         human decision or review
+#         planned        not implemented
+# human_review: true where the stage ends in a decision a human must make (agents prepare evidence only)
+schema: g2f-workflow-stages/1
+stages:
+  - id: inputs
+    stage: 0
+    purpose: register read files, detect duplicates/derived copies, checksum, choose HiFi-only vs HiFi+ONT
+    status: workflow
+    entry: [scripts/g2f_tool.py]
+    rules: [identity_stamp, inventory, checksum]
+    outputs: ["results/<S>/inputs/inventory.json", "results/<S>/inputs/md5/"]
+    gate: no duplicate or derived inputs; inputs unchanged since results were built
+    human_review: false
+  - id: sample_identity
+    stage: 0
+    purpose: k-mer genotype fingerprinting of each read set against all genotypes; read-level forensics for mixtures
+    status: tool
+    entry: [scripts/g2f_fingerprint.py, scripts/g2f_read_forensics.py]
+    rules: [fingerprint_sketch, fingerprint_analyze]
+    outputs: ["results/fingerprint/"]
+    gate: each read set assigned to its labelled genotype; per-run mixture checked for heterozygous accessions
+    human_review: true
+  - id: read_prep
+    stage: 1
+    purpose: HiFi BAM->FASTQ, ONT length filter, read statistics, prepared-input verification
+    status: workflow
+    entry: []
+    rules: [hifi_bam_to_fastq, hifi_read_stats, validate_hifi_reads, ont_input_stats, ont_filter, validate_ont_reads, verify_prepared_inputs]
+    outputs: ["results/<S>/reads/"]
+    gate: verify_prepared_inputs passes before assembly
+    human_review: false
+  - id: kmer
+    stage: 2
+    purpose: meryl database, histogram, heterozygosity screen (diagnostic)
+    status: workflow
+    entry: []
+    rules: [meryl_count, meryl_histogram, kmer_screen, kmer_assess]
+    outputs: ["results/<S>/kmer/"]
+    gate: diagnostic only; a heterozygous flag routes the sample to a human strategy decision
+    human_review: true
+  - id: assembly
+    stage: 3
+    purpose: hifiasm with an immutable method file (default -l0, --ul when ONT present)
+    status: workflow
+    entry: [scripts/run_all_assemblies.sh, scripts/run_one_genotype.sh]
+    rules: [hifiasm, check_gfa_fasta]
+    outputs: ["results/<S>/assembly/<method_id>/"]
+    gate: GFA/FASTA consistency; provenance with hifiasm version and Git commit
+    human_review: false
+  - id: assembly_strategy_heterozygous
+    stage: 3
+    purpose: dual-haplotype runs, purge-level and coverage-override (--hom-cov, --pri-range) experiments for heterozygous samples
+    status: project_script
+    entry: []
+    rules: []
+    outputs: ["project records"]
+    gate: compared with -l0 on pair k-mer completeness, homozygous k-mers twice/absent, BUSCO D per haplotype, sequence fate
+    human_review: true
+  - id: standard_qc
+    stage: 4
+    purpose: contiguity, BUSCO (pinned dataset), Merqury QV and completeness
+    status: workflow
+    entry: []
+    rules: [assembly_stats, small_contigs, validate_assembly_stats, busco, validate_busco, merqury, validate_merqury, sample_summary, project_summary]
+    outputs: ["results/<S>/qc/<method_id>/", "results/summary/"]
+    gate: "*.validated.<VID>.<SID>.json markers"
+    human_review: false
+  - id: read_support
+    stage: 5
+    purpose: HiFi/ONT read support, depth classes, graph paths, pairwise sequence fate between assemblies
+    status: tool
+    entry: [scripts/g2f_asmqc.py]
+    rules: []
+    outputs: ["<asm_validation>/samples/<S>/<A>/"]
+    gate: VALIDATED.json per stage
+    human_review: false
+  - id: synteny
+    stage: 5
+    purpose: gene-anchored alignment to an annotated reference; junctions, duplicated loci, chromosome blocks
+    status: tool
+    entry: [scripts/g2f_anchorwave.py, scripts/g2f_anchorwave_synteny.py]
+    rules: []
+    outputs: ["<anchorwave>/samples/<S>/<A>/"]
+    gate: VALIDATED.json per stage; container sha256 recorded
+    human_review: false
+  - id: junction_evaluation
+    stage: 5
+    purpose: SUPPORTED / CONTRADICTED / UNRESOLVED per reference junction from uniquely spanning HiFi and ONT reads
+    status: project_script
+    entry: [scripts/g2f_breakpoint_reads.py]
+    rules: []
+    outputs: ["project records"]
+    gate: every junction classified; reference agreement is never counted as support
+    human_review: true
+  - id: chromosome_assignment
+    stage: 5
+    purpose: provisional chromosome assignment with confidence tiers; telomere-array scan; two-copy candidates
+    status: project_script
+    entry: []
+    rules: []
+    outputs: ["project records"]
+    gate: confidence rules stated with the table
+    human_review: false
+  - id: structural_correction
+    stage: 6
+    purpose: break contradicted joins / split read-untestable joins without changing any base; coordinate map + AGP
+    status: project_script
+    entry: []
+    rules: []
+    outputs: ["candidate FASTA + VERIFY.json + coordinate map + AGP"]
+    gate: pieces concatenate to the original; identical length and base composition
+    human_review: true
+  - id: selection
+    stage: 7
+    purpose: choose the deliverable per sample from alternatives scored on identical metrics
+    status: manual
+    entry: []
+    rules: []
+    outputs: ["project records: decision tables"]
+    gate: conflicting evidence and unexplained failures shown, never auto-resolved
+    human_review: true
+  - id: release_package
+    stage: 8
+    purpose: immutable versioned release; per-unit package, checksums, validation report, manifest
+    status: project_script
+    entry: []
+    rules: []
+    outputs: ["releases/<release>/"]
+    gate: release validation passes; previous releases re-verified unchanged
+    human_review: true
+  - id: release_naming
+    stage: 8
+    purpose: chromosome-aware identifiers (HIGH confidence only) with bidirectional maps and per-record sequence hashes
+    status: project_script
+    entry: []
+    rules: []
+    outputs: ["<LINE>/<LINE>.<ver>_id_map.tsv"]
+    gate: per-record sequence SHA-256 identical; IDs unique; header-only difference
+    human_review: true
+  - id: release_ordering
+    stage: 8
+    purpose: reorder complete FASTA records (chr1..chrN numerically, then chrUn); independent verification
+    status: tool
+    entry: [scripts/g2f_release_fasta.py]
+    rules: []
+    outputs: ["<LINE>/<LINE>.<ver>.fa", "<LINE>.order_verification.json"]
+    gate: g2f_release_fasta.py verify passes
+    human_review: false
+  - id: annotation_input_gate
+    stage: 8
+    purpose: check identifiers and bases against the annotation tool's input handling (GeneCAD)
+    status: tool
+    entry: [scripts/g2f_genecad_input_check.py]
+    rules: []
+    outputs: ["<LINE>.genecad_input_check.json"]
+    gate: all checks pass
+    human_review: false
+  - id: provenance_report
+    stage: 8
+    purpose: tabulate step provenance records (commands, tool versions, Git commit, dirty flag)
+    status: tool
+    entry: [scripts/g2f_provenance_report.py]
+    rules: []
+    outputs: ["provenance table TSV"]
+    gate: none (reporting)
+    human_review: false
+  - id: annotation
+    stage: 9
+    purpose: repeat and gene annotation (EDTA, GeneCAD, PlantCAD)
+    status: planned
+    entry: []
+    rules: []
+    outputs: []
+    gate: see docs/planned_extensions.md
+    human_review: true
