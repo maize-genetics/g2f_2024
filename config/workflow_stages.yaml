@@ -219,11 +219,11 @@ stages:
     human_review: true
   - id: representation_coordinates
     stage: 8
-    purpose: convert GFF3 / BED features between AGP components (contigs) and objects (scaffolds) in both directions; write chain and gap BED from an AGP; check an AGP against both FASTAs with sequence-verified random round trips (and a chain cross-check)
+    purpose: convert GFF3 / BED features between AGP components (contigs) and objects (scaffolds) in both directions; write chain and gap BED from an AGP; check an AGP against both FASTAs with sequence-verified random round trips (and a chain cross-check); verify compressed FASTAs independently of their builder
     status: tool
-    entry: [scripts/g2f_agp_lift.py]
+    entry: [scripts/g2f_agp_lift.py, scripts/g2f_fasta_gz_verify.py]
     rules: []
-    outputs: ["converted GFF3 / BED + unmapped table", "<agp>.chain", "<agp>.gaps.bed", "check JSON"]
+    outputs: ["converted GFF3 / BED + unmapped table", "<agp>.chain", "<agp>.gaps.bed", "check JSON", "compressed-FASTA verification JSON (against the source, or the AGP and its components)"]
     gate: check PASS for every delivered AGP; features overlapping gaps or two components are reported as unmapped, never forced
     human_review: false
   - id: annotation
