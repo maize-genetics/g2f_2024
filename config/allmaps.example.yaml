@@ -1,0 +1,37 @@
+# Example run configuration for scripts/g2f_allmaps.py (reference-guided pseudomolecules with ALLMAPS).
+# Copy to config/local/ (untracked) and fill in real paths. All paths absolute.
+profile: allmaps_v1
+outdir: /path/to/project/pseudomolecules        # results go to <outdir>/<profile>/
+tmpdir: /path/to/tmp/allmaps                     # scratch; not /tmp
+science: config/allmaps_science.yaml
+
+runtime:
+  apptainer: apptainer
+  hisat2_image: /path/to/containers/hisat2-2.2.1--h503566f_8.sif      # quay.io/biocontainers/hisat2:2.2.1--h503566f_8
+  jcvi_image: /path/to/containers/jcvi-1.6.6--py310h3479294_0.sif     # quay.io/biocontainers/jcvi:1.6.6--py310h3479294_0
+  bind: [/path/to/project]                       # every input/output path must be under a bind
+  expect:                                        # optional: refuse to run if the runtime differs
+    hisat2: /usr/local/bin/hisat2-align-s version 2.2.1
+    jcvi: jcvi 1.6.6
+    hisat2_image_sha256: null
+    jcvi_image_sha256: null
+
+resources:
+  threads: 32
+  cpus: "0-31"              # taskset CPU list
+  nice: 10
+  max_rss_gb: 120           # per-command memory limit (GB): hard cap if memory_cap is set, and the watchdog limit
+  memory_cap: systemd-scope # or 'none' (watchdog only)
+  min_free_ram_gb: 32
+  reserve_disk_gb: 100
+  max_cpu_busy_frac: 0.2
+
+markers:                                         # sequence-anchor markers: FASTA + metadata (LG, marker ID, map position)
+  fasta: /path/to/anchors.fasta.gz
+  metadata: /path/to/anchors.txt.gz
+
+samples:                                         # one contig assembly per sample; never another sample's index
+  SAMPLE_A:
+    fasta: /path/to/SAMPLE_A.contigs.fa          # uncompressed, samtools faidx-indexed
+    label: SAMPLE_A                              # output prefix (<label>.allmaps.fasta / .agp)
+    expected_sha256: null                        # optional; the index stage refuses a different FASTA

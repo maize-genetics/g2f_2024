@@ -91,6 +91,33 @@ stages:
     outputs: ["<anchorwave>/samples/<S>/<A>/"]
     gate: VALIDATED.json per stage; container sha256 recorded
     human_review: false
+  - id: synteny_overview
+    stage: 5
+    purpose: riparian (GENESPACE-style) overview of delivered records vs the reference from existing AnchorWave anchors; per-record dominant chromosome, inversions, inter-chromosomal candidates
+    status: tool
+    entry: [scripts/g2f_riparian.py]
+    rules: []
+    outputs: ["<out>/sequences.tsv", "<out>/unit_summary.tsv", "<out>/figures/"]
+    gate: visual QC only; flagged records go to junction evaluation, never straight to an edit
+    human_review: true
+  - id: structure_confidence_map
+    stage: 5
+    purpose: per-region structural classes (consistent / inversion / off-chromosome / ambiguous / redundant / no anchor) from a riparian run, combined with junction read calls, release edits and depth windows; separates read-supported reference differences from read-contradicted or unspanned candidates
+    status: tool
+    entry: [scripts/g2f_structure_map.py]
+    rules: []
+    outputs: ["<out>/flagged_regions.tsv", "<out>/regions.tsv", "<out>/unit_summary.tsv", "<out>/figures/"]
+    gate: classes are candidates; read evidence decides; never an automatic edit
+    human_review: true
+  - id: duplicate_pairs
+    stage: 5
+    purpose: same-FASTA duplicate candidates (two records carrying the same reference gene anchors) - shared anchors, minimap2 identity / coverage against each other and against the other haplotype, read depth; rule-based reading (allelic / near-identical / paralogous / true duplication)
+    status: tool
+    entry: [scripts/g2f_dup_pairs.py]
+    rules: []
+    outputs: ["<out>/dup_pairs.tsv", "<out>/paf/"]
+    gate: evidence table for a human decision; nothing is purged or removed
+    human_review: true
   - id: junction_evaluation
     stage: 5
     purpose: SUPPORTED / CONTRADICTED / UNRESOLVED per reference junction from uniquely spanning HiFi and ONT reads
@@ -117,6 +144,15 @@ stages:
     rules: []
     outputs: ["candidate FASTA + VERIFY.json + coordinate map + AGP"]
     gate: pieces concatenate to the original; identical length and base composition
+    human_review: true
+  - id: assembly_comparison
+    stage: 7
+    purpose: contiguity (N50/NG50, size classes), gene-anchor statistics, BUSCO and Merqury of alternative assemblies side by side from existing QC files, one row per FASTA (haplotypes never summed)
+    status: tool
+    entry: [scripts/g2f_assembly_compare.py]
+    rules: []
+    outputs: ["<out>/assembly_compare.tsv", "<out>/figures/ngx_by_line.*"]
+    gate: evidence for the selection decision; compare within assembly class; fewer contigs is not by itself better
     human_review: true
   - id: selection
     stage: 7
@@ -171,6 +207,24 @@ stages:
     rules: []
     outputs: ["provenance table TSV"]
     gate: none (reporting)
+    human_review: false
+  - id: reference_guided_pseudomolecules
+    stage: 8
+    purpose: optional derived product; order and orient released contigs into chromosome pseudomolecules from sequence-anchor markers (HISAT2 unique-marker mapping, ALLMAPS merge + path); contigs never split; AGP + chain for coordinate liftover
+    status: tool
+    entry: [scripts/g2f_allmaps.py]
+    rules: []
+    outputs: ["<allmaps>/samples/<S>/{scaffold,scaffold_refpos}/<label>.allmaps.{fasta,agp,chain}", "<allmaps>/samples/<S>/{scaffold,scaffold_refpos}/placement.tsv"]
+    gate: VALIDATED.json per stage; AGP reconstruction equals the output FASTA; every source contig exactly once; reference-guided order is not counted as structural support
+    human_review: true
+  - id: representation_coordinates
+    stage: 8
+    purpose: convert GFF3 / BED features between AGP components (contigs) and objects (scaffolds) in both directions; write chain and gap BED from an AGP; check an AGP against both FASTAs with sequence-verified random round trips (and a chain cross-check)
+    status: tool
+    entry: [scripts/g2f_agp_lift.py]
+    rules: []
+    outputs: ["converted GFF3 / BED + unmapped table", "<agp>.chain", "<agp>.gaps.bed", "check JSON"]
+    gate: check PASS for every delivered AGP; features overlapping gaps or two components are reported as unmapped, never forced
     human_review: false
   - id: annotation
     stage: 9

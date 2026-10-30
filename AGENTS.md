@@ -200,6 +200,24 @@ Every reported numerical result must be traceable to:
 Generate summary tables from verified results rather
 than manually transcribing metrics whenever possible.
 
+## Human-neutral reporting
+Generated reports, audits, results, figures, filenames and
+release-decision documents name no individual collaborators,
+supervisors or lab members unless attribution is
+scientifically or legally required.
+- Cite feedback by topic or a stable issue identifier (e.g.
+  "assembly review item R2"), never by a person's name or
+  initials. Use terms such as "collaborator feedback",
+  "pedigree clarification", "release recommendation".
+- Trace decisions through evidence paths, dated review
+  records and issue identifiers.
+- Keep original correspondence, authorship metadata and
+  citations unchanged. Required attribution (citations,
+  data-source credit, approval authority) stays; prefer the
+  role over the name.
+- Apply to new outputs and new revisions; do not rewrite
+  finished records or immutable releases to apply it.
+
 ## Scope boundaries
 Priority 1: validated assemblies for nine G2F maize lines.
 Priority 2: assembly QC, comparison, and publication tables.

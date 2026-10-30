@@ -31,6 +31,7 @@ The code is species-agnostic. These values are species- or project-specific and 
 | k-mer size | `config/science.yaml` `kmer.k` | 21 |
 | Reference genome and annotation for synteny | `config/local/anchorwave.yaml` (`config/anchorwave.example.yaml`) | B73 RefGen v5 + its GFF3 |
 | Reference chromosome names | assignment tables / release naming | `chr1` … `chr10` |
+| Sequence-anchor markers for reference-guided pseudomolecules | `config/local/allmaps.yaml` (`config/allmaps.example.yaml`); LG labels in `config/allmaps_science.yaml` | pan-genome anchor markers (100 bp, LG 1–10) |
 | Known reference artefacts | project records | e.g. reference N-gaps and long tandem repeat arrays at which contigs end |
 
 Add another species by changing these values, not code.
@@ -118,6 +119,9 @@ To rerun or extend QC without reassembly, see [rerunning_qc.md](rerunning_qc.md)
 |---|---|---|
 | read support, depth classes, graph paths, pairwise sequence fate | `scripts/g2f_asmqc.py` ([assembly_validation.md](assembly_validation.md)) | **tool** |
 | gene-anchored synteny to a reference | `scripts/g2f_anchorwave.py` + `g2f_anchorwave_synteny.py` ([anchorwave.md](anchorwave.md)) | **tool** (container) |
+| whole-genome riparian overview (visual QC) | `scripts/g2f_riparian.py` from existing AnchorWave anchors; lifts anchors through split coordinate maps. `--order synteny` (GENESPACE-like, records sorted and flipped by the reference) or `--order assembly` (records grouped by the assembly's own chromosome assignment, FASTA order, released orientation; a chromosome-grouped contig view, not scaffolds); `--order both --compare LINE` draws the two side by side | **tool** |
+| structural-confidence map | `scripts/g2f_structure_map.py`: synteny classes per region from a riparian run, joined to junction read calls, release edits and depth windows; read-supported reference differences vs. read-contradicted / unspanned candidates | **tool** |
+| same-assembly duplicate candidates | `scripts/g2f_dup_pairs.py`: shared gene anchors, minimap2 identity / coverage (vs. each other and vs. the other haplotype), depth; rule-based reading | **tool** |
 | reads across a specific breakpoint | `scripts/g2f_breakpoint_reads.py` | **tool** |
 | per-junction call: SUPPORTED / CONTRADICTED / UNRESOLVED | junction evaluation over AnchorWave junctions plus HiFi and ONT spanning reads | **project script** |
 | chromosome assignment, telomere scan | assignment from AnchorWave blocks; telomere-array scan | **project script** |
@@ -156,6 +160,9 @@ Agents prepare evidence tables. Humans decide.
 - Never auto-select an assembly when QC evidence conflicts. Examples: better contiguity but more misjoin sites, or
   lower duplication but lost genes.
 - Present every alternative with the same metrics, and say what each alternative omits.
+  `scripts/g2f_assembly_compare.py` (**tool**) builds that table from existing QC files: contiguity, NG50, size
+  classes, gene-anchor statistics, BUSCO and Merqury, one row per FASTA. Compare haplotypes with haplotypes and
+  primaries with primaries.
 - An unexplained check failure is reported as unexplained. It is never relabelled as a pass.
 - Distinguish three things:
   - *technical release validation*: checksums, structure, file contracts;
@@ -193,6 +200,85 @@ Agents prepare evidence tables. Humans decide.
    reference span is also covered by a stronger contig.
 5. **Every release has an authoritative manifest.** It lists one FASTA per unit, with its path, sha256, record count
    and size, and the source release it was derived from.
+
+## Stage 8b — Reference-guided pseudomolecules (**tool**, optional derived product)
+
+Entry: `scripts/g2f_allmaps.py` (`check-env`, `plan`, `run`, `status`; configuration `config/allmaps.example.yaml`,
+science `config/allmaps_science.yaml`). It orders and orients released contigs into chromosome pseudomolecules from
+sequence-anchor markers with a known chromosome (LG) and map position, using HISAT2 and ALLMAPS (jcvi), both from
+pinned containers.
+
+| stage | what it does | gate |
+|---|---|---|
+| `markers` | validates the marker FASTA and metadata (IDs match, lengths, duplicates); maps each distinct sequence once; keeps a marker-ID → unique-marker → map-position table | every marker ID accounted for; identical sequences must carry one LG and one position |
+| `index:S` | `hisat2-build` of one assembly in its own stage directory | the index lists exactly the FASTA's records and lengths; optional expected sha256 |
+| `map:S` | maps the unique markers; keeps a marker only if its primary alignment is unique (`NH` ≤ 1, MAPQ ≥ 60, no `ZS` second-best), unspliced, unclipped and within the edit-distance limit | counts of every rejection class recorded |
+| `scaffold:S` | per-contig support from **unique** markers; contig LG conflicts; deterministic, evenly spaced ALLMAPS input; ALLMAPS `merge` + `path`; independent AGP reconstruction | every source contig used exactly once, entire, in the stated orientation; output = source + gaps, base for base |
+| `scaffold_refpos:S` (optional; config `reference_positions`) | the same as `scaffold:S`, but each marker's map position is replaced by the position of its unique hit in a reference sample of the same run (e.g. the current reference assembly); markers whose reference hit is not unique or not on the chromosome of their LG are dropped | as `scaffold:S`; needs `map:REF` |
+
+`scaffold_refpos` exists for marker maps whose positions are coordinates of an **older reference version**: blocks
+inverted between reference versions would otherwise orient contigs as the older reference did. Both variants are
+reference-derived; which one a product uses is a scientific decision recorded with it.
+
+`placement.tsv` reports, per placed contig, a robust map interval (5th–95th percentile of its markers' positions) and
+two review flags, neither of which changes the placement:
+- `OVERLAPS_LARGER`: at least half of the contig's interval lies inside the intervals of longer contigs placed on the
+  same pseudomolecule. This is typical of a redundant copy (an unpurged allele or haplotig) placed in tandem, which
+  inflates the pseudomolecule.
+- `ORDER_AMBIGUOUS`: the intervals of two adjacent contigs overlap by more than half of the narrower one, so their
+  relative order is weakly determined.
+
+**Rules**
+1. **The product is derived and labelled as such.** The gap-free contig FASTA stays the primary product and the
+   annotation input. Pseudomolecules are a separate, versioned representation with an AGP and a chain file, so
+   coordinates can be lifted in both directions.
+2. **Reference-guided ordering is not validation.**
+   - Marker map positions are expressed in reference coordinates. Agreement with other reference-based analyses
+     (gene-anchor synteny) is consistency, not independent evidence.
+   - A contig placed on a chromosome is not thereby structurally correct.
+   - Gaps between contigs have a fixed length and no measured size.
+3. **Contigs are never split, trimmed or edited here.**
+   - A contig whose markers come from several LGs is placed by its majority LG.
+   - It is flagged (`MIXED_LG`, `CONFLICT_BLOCK`) and goes to junction evaluation (stage 5) for a human decision.
+4. **Support is counted in unique markers and distinct map positions,** never in redundant marker records. Markers
+   that share one map position carry no order information.
+5. **One assembly, one index.** An index is built inside the assembly's stage directory and checked against that
+   FASTA; it is never found by searching a shared directory.
+6. **Haplotype assemblies are scaffolded separately,** one haploid FASTA per run. Two haplotypes are never merged
+   into one pseudomolecule set.
+
+**Differences from the NAM-style reference implementation** that this stage replaces:
+
+| reference implementation | this stage | why |
+|---|---|---|
+| uniqueness by removing records with `XA`/`SA` tags | `NH`, MAPQ, `ZS` and secondary records | HISAT2 does not write `XA`/`SA`; that filter removes nothing |
+| HISAT2 defaults (spliced alignment, up to 5 alignments reported) | `--no-spliced-alignment`, `-k 10`, primary record only | markers are genomic windows; repeats must be visible to be rejected |
+| every marker record mapped; rows collapsed afterwards by `sort \| uniq` once the ID is cut | each distinct sequence mapped once | identical records are one piece of evidence |
+| up to 100 random markers per contig (`sort -R`) | up to N markers evenly spaced along the contig | deterministic; keeps positional coverage |
+| contig needs > 20 rows (secondary alignments and repeat copies included) | thresholds on unique markers and distinct map positions | non-unique hits and shared map positions are not order evidence |
+| non-majority-LG markers silently removed | removed from the ALLMAPS input but reported per contig, with conflict blocks | chimeric contigs must stay visible |
+| index reused if any `*.ht2` exists below `./index` | index per assembly, checked against the FASTA | avoids using another assembly's index |
+| outputs written to the current directory; the per-contig map appended with `>>` | `.partial` stage directories, `VALIDATED.json`, nothing overwritten | a rerun cannot duplicate markers; resumable and auditable |
+| map name taken from the output name; no check of the merged map | fixed map file name; merged-marker count checked | `allmaps merge` silently skips lines it cannot parse; marker names are split on `-` (jcvi 1.6.6 sanitises map names, other versions not checked) |
+| no output check | AGP reconstruction compared with the output FASTA | proves no sequence was lost, duplicated or altered |
+
+
+### Converting coordinates between contigs and scaffolds (`scripts/g2f_agp_lift.py`, **tool**)
+
+The AGP of a reference-guided product maps every contig to its scaffold position, so features annotated on one
+representation can be converted to the other:
+
+```
+python3 scripts/g2f_agp_lift.py gff --agp UNIT.agp --to object    -i genes.contigs.gff3   -o genes.scaffolds.gff3 --unmapped u.tsv
+python3 scripts/g2f_agp_lift.py gff --agp UNIT.agp --to component -i genes.scaffolds.gff3 -o genes.contigs.gff3   --unmapped u.tsv
+python3 scripts/g2f_agp_lift.py check --agp UNIT.agp --component-fasta contigs.fa --object-fasta scaffolds.fa --chain UNIT.chain
+```
+
+- `−` components mirror coordinates and flip the strand; IDs, attributes and CDS phase are unchanged.
+- Features that overlap a gap or two components have no contig equivalent. They are written to `--unmapped` with the
+  reason, and a gene hierarchy is kept or dropped as a whole.
+- `chain` and `gaps` write a UCSC chain and a gap BED from the AGP.
+- `check` verifies the AGP reconstruction and tests random intervals in both directions by sequence comparison.
 
 ## Extending the workflow
 

@@ -1,0 +1,60 @@
+# Scientific parameters for reference-guided pseudomolecule construction with ALLMAPS
+# (scripts/g2f_allmaps.py). Resource settings (threads, CPUs, memory) belong in the run configuration.
+# Changing anything here changes the params hash of the affected stages: their results become
+# "stale" and are rerun only with --rerun-stale (old results kept).
+#
+# The defaults reproduce the intent of the NAM-style procedure (sequence anchors mapped with HISAT2,
+# ALLMAPS merge + path) with the safeguards documented in docs/workflow_guide.md ("Reference-guided
+# pseudomolecules"). Thresholds marked "pilot" were set on the B73 benchmark and pilot lines; the
+# project record that justifies them is cited in the run report, not here.
+version: 1
+
+markers:
+  # The marker FASTA has many records with identical sequence. They are mapped once
+  # (one "unique marker" per distinct sequence) and every original marker ID stays traceable.
+  drop_non_acgt: true            # sequences containing any base other than A/C/G/T are not mapped
+  on_inconsistent_duplicate: fail  # identical sequence with different LG or map position: fail | drop
+  lg_labels:                     # map LG (column 1 of the metadata) -> label used in ALLMAPS (object = "chr" + label)
+    "1": "01"
+    "2": "02"
+    "3": "03"
+    "4": "04"
+    "5": "05"
+    "6": "06"
+    "7": "07"
+    "8": "08"
+    "9": "09"
+    "10": "10"
+
+hisat2:
+  # --no-spliced-alignment: markers are genomic windows, never split across introns (HISAT2 splices by default)
+  # --no-softclip, --mp 1,1: as in the reference implementation (end-to-end, flat mismatch penalty)
+  # --score-min L,0,-0.2: the HISAT2 default, stated explicitly (<= 20 mismatches for 100 bp at --mp 1,1)
+  # -k 10: report up to 10 alignments, so that NH:i and secondary records reveal repeats
+  args: ["--no-spliced-alignment", "--no-softclip", "--mp", "1,1", "--score-min", "L,0,-0.2", "-k", "10"]
+
+filter:
+  # A unique marker is kept only if its primary alignment satisfies ALL of these.
+  min_mapq: 60                   # HISAT2: 60 = unique, 1 = multiple, 0 = ...
+  max_nh: 1                      # NH:i (number of alignments found, up to -k)
+  reject_zs: true                # ZS:i present = a second-best alignment exists
+  max_nm: 5                      # edit distance (mismatches + indel bases) for 100-bp markers (95 % identity)
+
+scaffold:
+  min_contig_bp: 100000          # reference implementation: contig > 100 kb
+  # Marker support is counted on UNIQUE markers of the contig's majority LG (never on redundant marker IDs):
+  min_unique_markers: 10         # pilot
+  min_distinct_positions: 5      # pilot: distinct map positions (markers sharing a map position add no order)
+  max_markers_per_contig: 100    # evenly spaced along the contig (reference implementation: 100 random records)
+  # Within-contig LG conflicts are flagged for review, never split. A conflict block is a run of
+  # consecutive markers (in contig order) of one non-majority LG.
+  conflict_min_markers: 5
+  conflict_min_span_bp: 50000
+  mixed_lg_min_frac: 0.10        # flag MIXED_LG if markers of other LGs make up at least this fraction ...
+  mixed_lg_min_markers: 10       # ... and at least this many unique markers
+  orientation_min_abs_rho: 0.5   # Spearman |rho| (contig position vs map position) for a supported orientation
+  orientation_min_positions: 3
+
+allmaps:
+  path_args: ["--mincount", "3", "--gapsize", "100", "--seed", "666", "--ngen", "500", "--npop", "100"]
+  plot_format: png               # per-pseudomolecule diagnostic plots; null = --noplot. jcvi 1.6.6 path writes PDF regardless
