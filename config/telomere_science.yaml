@@ -1,0 +1,54 @@
+# Scientific parameters for telomere identification and telomere-based integrity QC (scripts/g2f_telomere.py).
+# These are the built-in defaults (tests/test_telomere.py keeps the two identical). Pass a copy with --science to
+# change them; the effective values are recorded in every VALIDATED.json. Resource settings (threads) are CLI options.
+version: 1
+
+# Telomeric repeat unit, G-rich strand. Plants (including maize): TTTAGGG. Vertebrates: TTAGGG. Any rotation is
+# equivalent for tidk; the array caller searches this string and its reverse complement exactly.
+motif: TTTAGGG
+
+tidk:
+  # Primary end call (tidk ends): a telomere of >= min_length bp within max_offset bp of the end, on the expected
+  # strand (C-rich at a sequence start, G-rich at an end). 200 bp is permissive on purpose; classes below separate
+  # weak calls from kilobase-scale arrays.
+  primary: {window: 10000, min_length: 200, max_offset: 1000, exact: false}
+  # Second run with a long window, used only for the array length (the 10-kb window truncates long telomeres).
+  length_window: 100000
+  # Sensitivity settings, reported per end (not used for the class).
+  sensitivity:
+    - {name: l500, window: 100000, min_length: 500, max_offset: 1000, exact: false}
+    - {name: l1000, window: 100000, min_length: 1000, max_offset: 1000, exact: false}
+    - {name: l3000, window: 100000, min_length: 3000, max_offset: 1000, exact: false}
+    - {name: o10k, window: 100000, min_length: 200, max_offset: 10000, exact: false}
+    - {name: exact, window: 10000, min_length: 200, max_offset: 1000, exact: true}
+  search_window: 10000            # tidk search window (genome-wide repeat density)
+
+arrays:
+  # Position-level caller: exact motif hits chained while the gap between hits is <= max_gap bp (tolerates diverged
+  # units and indels); chains with >= min_hits hits are written.
+  max_gap: 50
+  min_hits: 5
+
+classes:
+  kb_bp: 1000                     # TEL_KB: tidk present and >= this length (convincing)
+  short_min_bp: 200               # TEL_SHORT: present and below kb_bp; also the minimum motif bp of a reported array
+  terminal_window: 100000         # arrays within this distance of an end are terminal/subterminal, beyond it interstitial
+  at_end: 1000                    # arrays within this distance of an end are "terminal"
+
+# Chromosome objects in scaffold FASTAs: <label><regex>, group 1 = chromosome number, group 2 = optional part number.
+chromosome_regex: '_chr(\d+)(?:_part(\d+))?$'
+
+tips:
+  # End identity against a reference (ideally telomere-to-telomere). Segments are taken end-first (R ends
+  # reverse-complemented), so a correctly oriented chromosome start aligns + near reference position 0.
+  segment_bp: 1000000
+  outer_bp: 300000                # outer window: telomere-adjacent, often repeat-rich (subtelomeric sequence)
+  inner_bp: [300000, 1000000]     # inner window: mostly unique sequence; prefer it when the two disagree
+  near_end_bp: 4000000            # REF_START / REF_END if the extrapolated end lies within this of a reference end
+  min_mapq: 5
+  preset: asm20
+
+closure:
+  min_mapq: 20
+  outer_bp: 1000                  # reads whose alignment reaches the outer 1 kb of a telomeric contig end
+  min_clip_bp: 500                # outward soft clip counted as sequence beyond the end

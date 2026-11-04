@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""Test stub for tidk >= 0.3 (`--version`, `ends`, `search`, `explore`), output formats as tidk 0.3.2.
+Exact-repeat runs only (real tidk tolerates errors); enough to exercise g2f_telomere.py on synthetic data."""
+import argparse
+import gzip
+import os
+import re
+import sys
+
+RC = str.maketrans("ACGTN", "TGCAN")
+
+
+def records(path):
+    op = gzip.open if path.endswith(".gz") else open
+    name, buf = None, []
+    with op(path, "rt") as fh:
+        for l in fh:
+            if l.startswith(">"):
+                if name:
+                    yield name, "".join(buf).upper()
+                name, buf = l[1:].split()[0], []
+            else:
+                buf.append(l.strip())
+    if name:
+        yield name, "".join(buf).upper()
+
+
+def runs(seq, unit):
+    """maximal runs of tandem exact copies of unit -> [(start0, end)]"""
+    return [(m.start(), m.end()) for m in re.finditer(f"(?:{unit})+", seq)]
+
+
+def g_unit(s):
+    s = s.upper()
+    rc = s.translate(RC)[::-1]
+    return s if s.count("G") >= rc.count("G") else rc
+
+
+if len(sys.argv) > 1 and sys.argv[1] in ("-V", "--version"):
+    print("tidk 0.3.2")
+    sys.exit(0)
+cmd = sys.argv[1]
+ap = argparse.ArgumentParser()
+ap.add_argument("fasta")
+ap.add_argument("-s", "--string")
+ap.add_argument("-w", "--window", type=int, default=10000)
+ap.add_argument("--min-length", type=int, default=200)
+ap.add_argument("--max-offset", type=int, default=1000)
+ap.add_argument("--exact", action="store_true")
+ap.add_argument("-o", "--output")
+ap.add_argument("-d", "--dir", default=".")
+ap.add_argument("-m", "--minimum")
+ap.add_argument("-x", "--maximum")
+a = ap.parse_args(sys.argv[2:])
+if cmd == "explore":
+    print("canonical_repeat_unit\tcopies\tcopies_as_unit\tcopies_as_revcomp")
+    sys.exit(0)
+os.makedirs(a.dir, exist_ok=True)
+G = g_unit(a.string)
+C = G.translate(RC)[::-1]
+if cmd == "search":
+    with open(os.path.join(a.dir, f"{a.output}_telomeric_repeat_windows.tsv"), "w") as fh:
+        fh.write("id\twindow\tforward_repeat_number\treverse_repeat_number\ttelomeric_repeat\n")
+        for name, s in records(a.fasta):
+            for w0 in range(0, len(s), a.window):
+                chunk = s[w0:w0 + a.window]
+                fh.write(f"{name}\t{min(w0 + a.window, len(s))}\t{chunk.count(a.string.upper())}\t"
+                         f"{chunk.count(a.string.upper().translate(RC)[::-1])}\t{a.string}\n")
+    sys.exit(0)
+assert cmd == "ends", cmd
+rows = []
+for name, s in records(a.fasta):
+    L = len(s)
+    for side in ("start", "end"):
+        if side == "start":
+            win = (0, min(a.window, L))
+            exp, opp = runs(s[:win[1]], C), runs(s[:win[1]], G)
+            dist = lambda r: r[0]
+        else:
+            win = (max(0, L - a.window), L)
+            exp = [(x + win[0], y + win[0]) for x, y in runs(s[win[0]:], G)]
+            opp = [(x + win[0], y + win[0]) for x, y in runs(s[win[0]:], C)]
+            dist = lambda r: L - r[1]
+        exp = [r for r in exp if r[1] - r[0] >= a.min_length]
+        opp = [r for r in opp if r[1] - r[0] >= a.min_length]
+        st, best = "absent", None
+        if exp:
+            best = min(exp, key=dist)
+            st = "present" if dist(best) <= a.max_offset else "not_terminal"
+        elif opp and dist(min(opp, key=dist)) <= a.max_offset:
+            best, st = min(opp, key=dist), "wrong_strand"
+        if best:
+            strand = "C-rich" if (best in exp) == (side == "start") else "G-rich"
+            lim = "true" if (best[1] >= win[1] if side == "start" else best[0] <= win[0]) and win != (0, L) else "false"
+            rows.append(f"{name}\t{L}\t{side}\t{st}\t{best[0]}\t{best[1]}\t{best[1] - best[0]}\t{dist(best)}\t{strand}\t{lim}")
+        else:
+            rows.append(f"{name}\t{L}\t{side}\tabsent\tNA\tNA\tNA\tNA\tNA\tNA")
+with open(os.path.join(a.dir, f"{a.output}.ends.tsv"), "w") as fh:
+    fh.write("id\tsequence_length\tside\tstatus\ttelomere_start\ttelomere_end\ttelomere_length\toffset\tstrand\twindow_limited\n")
+    fh.write("\n".join(rows) + "\n")
+open(os.path.join(a.dir, f"{a.output}.ends.bed"), "w").close()
+open(os.path.join(a.dir, f"{a.output}.ends.json"), "w").write("{}\n")

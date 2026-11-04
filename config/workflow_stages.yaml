@@ -127,9 +127,18 @@ stages:
     outputs: ["project records"]
     gate: every junction classified; reference agreement is never counted as support
     human_review: true
+  - id: telomere_integrity
+    stage: 5
+    purpose: telomere identification and telomere-based integrity QC of contigs and scaffolds (tidk ends/search + a position-level array caller); contig arrays traced into scaffold coordinates through the AGP; chromosome-end inventory; telomeres placed at internal joins or beyond appended sequence; interstitial arrays; optional end identity against a telomere-to-telomere reference (minimap2), read closure at telomeric ends, before/after comparison of scaffold revisions, figures
+    status: tool
+    entry: [scripts/g2f_telomere.py]
+    rules: []
+    outputs: ["<scan>/{ends,search,arrays}/ + VALIDATED.json", "<integrate>/{contig_ends,scaffold_ends,chromosome_ends,contig_arrays,internal_candidates}.tsv + summary.json + VALIDATED.json", "<tips>/tip_calls.tsv", "<closure>/closure.tsv", "<compare>/{chromosome_ends,internal_arrays}.tsv", "<plot>/{map_<label>,end_heatmap}.{svg,pdf}"]
+    gate: VALIDATED.json per step; scan cross-checks the array caller against tidk search; integrate requires every placed contig array to reappear at its lifted scaffold position and contig/scaffold end classes to agree; a telomeric repeat at an internal position is evidence for review, never a misassembly call on its own
+    human_review: true
   - id: chromosome_assignment
     stage: 5
-    purpose: provisional chromosome assignment with confidence tiers; telomere-array scan; two-copy candidates
+    purpose: provisional chromosome assignment with confidence tiers; two-copy candidates (telomere scanning moved to telomere_integrity)
     status: project_script
     entry: []
     rules: []
@@ -216,6 +225,15 @@ stages:
     rules: []
     outputs: ["<allmaps>/samples/<S>/{scaffold,scaffold_refpos}/<label>.allmaps.{fasta,agp,chain}", "<allmaps>/samples/<S>/{scaffold,scaffold_refpos}/placement.tsv"]
     gate: VALIDATED.json per stage; AGP reconstruction equals the output FASTA; every source contig exactly once; reference-guided order is not counted as structural support
+    human_review: true
+  - id: scaffold_revision
+    stage: 8
+    purpose: AGP-level revision of reference-guided scaffolds from an explicit, reviewed change plan (reverse one component's orientation; unplace trailing components appended beyond a chromosome end); contigs never edited; orient-evidence proposes tip-orientation plan rows from alignment to a telomere-to-telomere reference
+    status: tool
+    entry: [scripts/g2f_agp_revise.py, scripts/g2f_agp_revise_verify.py]
+    rules: []
+    outputs: ["<out>/<prefix>.{agp,fa.gz,chain,gaps.bed,contig_to_scaffold.tsv,change_manifest.tsv} + BUILD.json", "verify JSON (g2f_agp_revise_verify.py)"]
+    gate: independent verifier PASS (AGP syntax, AGP reconstructs the FASTA, old->new AGP difference equals the plan exactly, unchanged records identical, no sequence lost, derived tables, lift round trip); telomere_integrity compare shows no regressed end and no new internal array; the change plan itself is a human decision
     human_review: true
   - id: representation_coordinates
     stage: 8

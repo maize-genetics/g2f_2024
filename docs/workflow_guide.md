@@ -124,7 +124,8 @@ To rerun or extend QC without reassembly, see [rerunning_qc.md](rerunning_qc.md)
 | same-assembly duplicate candidates | `scripts/g2f_dup_pairs.py`: shared gene anchors, minimap2 identity / coverage (vs. each other and vs. the other haplotype), depth; rule-based reading | **tool** |
 | reads across a specific breakpoint | `scripts/g2f_breakpoint_reads.py` | **tool** |
 | per-junction call: SUPPORTED / CONTRADICTED / UNRESOLVED | junction evaluation over AnchorWave junctions plus HiFi and ONT spanning reads | **project script** |
-| chromosome assignment, telomere scan | assignment from AnchorWave blocks; telomere-array scan | **project script** |
+| telomere identification and telomere-based integrity QC | `scripts/g2f_telomere.py` (see below) | **tool** |
+| chromosome assignment | assignment from AnchorWave blocks | **project script** |
 
 **Rules of evidence**
 - A difference from the reference is an *observation*, not an error. Agreement with the reference is not evidence that
@@ -137,6 +138,43 @@ To rerun or extend QC without reassembly, see [rerunning_qc.md](rerunning_qc.md)
   independent assemblies, and spanned by reads, is likely a real structural variant (or a reference artefact).
 - Run sensitivity variants (AnchorWave parameters, a lower minimum number of anchors) and report calls that depend on
   them.
+
+### Telomere integrity (`scripts/g2f_telomere.py`, **tool**)
+
+Science: `config/telomere_science.yaml` (motif, thresholds). The motif is a species parameter: plants TTTAGGG,
+vertebrates TTAGGG. Requires tidk ≥ 0.3.0; minimap2 and samtools are needed only for `tips` and `closure`. Each step
+writes a new directory (built as `.partial`, renamed after validation) with a `VALIDATED.json`.
+
+```
+g2f_telomere.py check-env
+g2f_telomere.py scan      --fasta UNIT.contigs.fa.gz   --label UNIT.contigs   --out scan/UNIT.contigs
+g2f_telomere.py scan      --fasta UNIT.scaffolds.fa.gz --label UNIT.scaffolds --out scan/UNIT.scaffolds
+g2f_telomere.py integrate --contigs-scan scan/UNIT.contigs --scaffolds-scan scan/UNIT.scaffolds --agp UNIT.agp \
+                          --label UNIT --out integrate/UNIT [--join-table joins.tsv] [--split-ends splits.tsv]
+g2f_telomere.py tips      --integrated integrate/UNIT --contigs C.fa.gz --scaffolds S.fa.gz --reference T2T.fa --out tips/UNIT
+g2f_telomere.py closure   --integrated integrate/UNIT --alignments hifi_vs_contigs.cram --contigs C.fa.gz --out closure/UNIT
+g2f_telomere.py plot      --integrated integrate/UNIT_A integrate/UNIT_B ... --out figures/
+```
+
+| step | what it does | gate |
+|---|---|---|
+| `scan` | `tidk ends` (primary call + sensitivity settings), `tidk search` (repeat counts per window), and a position-level array caller (every array, both strands, with coordinates) | tidk reported every record; the array caller's exact-hit totals equal `tidk search` up to hits straddling window boundaries |
+| `integrate` | classes every contig and scaffold end (TEL_KB ≥ 1 kb, TEL_SHORT 200–999 bp, SUBTERMINAL, WRONG_STRAND, ABSENT); lifts every contig array ≥ 200 bp through the AGP; lists chromosome ends, telomeres that face an internal join, interstitial arrays, unplaced telomeric contigs | every lifted array is found at the identical position in the independent scaffold scan, and scaffold and contig end classes agree; otherwise it refuses (stale scan or wrong AGP) |
+| `tips` | aligns each telomere-bearing contig end and each non-telomeric chromosome end (outer 1 Mb, end first) to a reference; calls REF_START / REF_END / INTERIOR_or_INVERTED in an outer (telomere-adjacent) and an inner (mostly unique) window | descriptive; prefer the inner window when the two disagree (shared subtelomeric repeats) |
+| `closure` | for telomeric contig ends: reads that reach the end, reads clipped beyond it, and whether the clipped sequence is itself telomeric | the alignment reference must match the contigs (names, lengths, MD5) |
+| `compare` | the same assembly before and after a scaffold revision: chromosome-end classes and kb-scale internal arrays | exit 3 if an end regressed or a new internal array appeared |
+
+**Reading the results**
+- **Counting telomeres:** count telomere-positive chromosome ends at scaffold level. Report contig-level telomeres
+  that scaffolding displaced separately.
+- **Expected background:** short interstitial runs (tens to ~150 bp) occur in complete genomes. Calibrate with a
+  telomere-to-telomere assembly of the species before interpreting them.
+- **A telomere at an internal join** means one of three things: the tip contig is reversed, sequence was appended
+  beyond a real chromosome end, or a chromosome tip is fused inside a contig. Decide with `tips`, `closure`, depth
+  and the join evidence. Arrays alone never decide.
+- **Reference-guided scaffolds** inherit the reference's tip orientation. Where the reference itself carries an
+  interstitial telomere or lacks a terminal one, check the tip against a telomere-to-telomere assembly.
+- **What it does not show:** a telomere at each end does not show that a chromosome is structurally correct.
 
 ## Stage 6 — Structural correction (**project script**, sequence-preserving)
 
@@ -279,6 +317,40 @@ python3 scripts/g2f_agp_lift.py check --agp UNIT.agp --component-fasta contigs.f
   reason, and a gene hierarchy is kept or dropped as a whole.
 - `chain` and `gaps` write a UCSC chain and a gap BED from the AGP.
 - `check` verifies the AGP reconstruction and tests random intervals in both directions by sequence comparison.
+
+## Stage 8c — Scaffold revision (**tool**, AGP level)
+
+Entry: `scripts/g2f_agp_revise.py` (`orient-evidence`, `check-plan`, `apply`) and the independent verifier
+`scripts/g2f_agp_revise_verify.py`. A revision changes placements only. Contigs are never edited, and every contig
+stays in the FASTA.
+
+1. **Evidence.**
+   - Telomere integrity (above).
+   - For tip orientation, `orient-evidence`: it aligns the leading or trailing components of chosen chromosome
+     objects to a telomere-to-telomere reference. It proposes `REVERSE_ORIENTATION` for a single reversed tip
+     component, or `MANUAL_REVIEW_BLOCK` when several components would change order.
+2. **Plan.** A TSV with the columns `action, object, component, old_orientation, new_orientation, new_status,
+   evidence_class, evidence` (an optional `unit` column). The actions are:
+   - `REVERSE_ORIENTATION`;
+   - `UNPLACE_TERMINAL_EXTENSION`: trailing components and the gap before each become unplaced records.
+
+   Deciding the plan is a human decision. Label the evidence class honestly: telomere-supported versus synteny-only.
+3. **`check-plan`, then `apply`.**
+   - `apply` writes the new AGP, the scaffold FASTA rebuilt from the contigs, chain, gap BED, contig-to-scaffold map,
+     line-level change manifest and `BUILD.json`.
+   - With `--join-table`, removed joins are listed separately, and joins next to a reversed component are marked as
+     not re-tested.
+4. **Verify** with `g2f_agp_revise_verify.py`. It must PASS before the output is used:
+   - the AGP is valid and reconstructs the FASTA;
+   - the old → new AGP difference equals the plan exactly;
+   - unchanged records are byte-for-byte the same sequence;
+   - no sequence is lost;
+   - the derived tables agree;
+   - random intervals lift correctly.
+5. **Re-scan** the revised scaffolds and run `g2f_telomere.py compare` against the old scan: no regressed end, no new
+   internal array.
+6. **Release.** A new versioned release keeps the previous AGPs and the change manifest. Coordinates of a feature
+   convert old scaffold → contigs → new scaffold with `g2f_agp_lift.py`.
 
 ## Extending the workflow
 
