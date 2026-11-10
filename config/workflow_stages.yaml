@@ -235,6 +235,24 @@ stages:
     outputs: ["<out>/<prefix>.{agp,fa.gz,chain,gaps.bed,contig_to_scaffold.tsv,change_manifest.tsv} + BUILD.json", "verify JSON (g2f_agp_revise_verify.py)"]
     gate: independent verifier PASS (AGP syntax, AGP reconstructs the FASTA, old->new AGP difference equals the plan exactly, unchanged records identical, no sequence lost, derived tables, lift round trip); telomere_integrity compare shows no regressed end and no new internal array; the change plan itself is a human decision
     human_review: true
+  - id: release_record_exclusion
+    stage: 8
+    purpose: remove whole unplaced-singleton records (e.g. foreign-contaminant or organellar contigs) from a contig FASTA and its scaffold FASTA, AGP, chain and contig-to-scaffold map, from an explicit exclusion plan; placed contigs are refused; kept records copied byte for byte; writes an EXCLUDED_RECORDS table (IDs, lengths, sequence hashes) so downstream features on those IDs can be dropped
+    status: tool
+    entry: [scripts/g2f_release_exclude.py, scripts/g2f_release_exclude_verify.py]
+    rules: []
+    outputs: ["<out>/{contigs,scaffolds_rg,provenance}/ + <prefix>.EXCLUDED_RECORDS.tsv + BUILD.json", "verify JSON (g2f_release_exclude_verify.py)"]
+    gate: independent verifier PASS (kept records identical and in order, excluded records exactly the plan with matching hashes, AGP/chain/map minus exactly those records, gaps unchanged, totals, indexes; with --agp-header / --relabel-linkage, the AGP comments equal the rendered template and gap lines differ only by the declared linkage-evidence term); the exclusion plan itself is a human decision
+    human_review: true
+  - id: seqid_alias
+    stage: 8
+    purpose: reversible short sequence-ID aliases (<= 13 characters, [A-Za-z0-9_]) for tools that rewrite long IDs (e.g. EDTA); alias FASTA with byte-identical sequences plus a one-to-one map; translates GFF3, BED, TSV and RepeatMasker .out back to the original IDs
+    status: tool
+    entry: [scripts/g2f_seqid_alias.py, scripts/g2f_seqid_alias_verify.py]
+    rules: []
+    outputs: ["<alias>.fa.gz + map TSV (alias, original_id, length, seq_sha256_upper)", "translated annotation files", "verify JSON (g2f_seqid_alias_verify.py)"]
+    gate: independent verifier PASS (same records and order, identical sequences, aliases unique and safe); unknown IDs stop a translation
+    human_review: false
   - id: representation_coordinates
     stage: 8
     purpose: convert GFF3 / BED features between AGP components (contigs) and objects (scaffolds) in both directions; write chain and gap BED from an AGP; check an AGP against both FASTAs with sequence-verified random round trips (and a chain cross-check); verify compressed FASTAs independently of their builder
