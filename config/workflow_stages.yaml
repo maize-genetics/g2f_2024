@@ -100,6 +100,15 @@ stages:
     outputs: ["<out>/sequences.tsv", "<out>/unit_summary.tsv", "<out>/figures/"]
     gate: visual QC only; flagged records go to junction evaluation, never straight to an edit
     human_review: true
+  - id: inversion_riparian_figure
+    stage: 5
+    purpose: publication figure of validated inversions vs the reference (vertical riparian, every assembly a track); config-driven (sources.tsv, loci.tsv, assemblies.tsv, legend.tsv), B73-anchored ribbons between adjacent tracks, reversed blocks, breakpoint intervals, contig ends, rc tags, optional junction marks; independent verifier re-reads the source tables
+    status: tool
+    entry: [scripts/g2f_inversion_riparian.py, scripts/g2f_inversion_riparian_verify.py]
+    rules: []
+    outputs: ["<prefix>.svg/.pdf/.png", "<tables>/ribbons.tsv, tracks.tsv, guides.tsv, tags.tsv", "<tables>/breakpoint_coverage.tsv (verifier, informational)"]
+    gate: verifier T1-T7 PASS (tracks = chain contigs with release lengths, ribbons adjacent and alignment-covered, crossing and colour match orientation and zones, inverted states have reversed ribbons and two junctions, row labels present); which inversions are shown and their wording is a human decision
+    human_review: true
   - id: structure_confidence_map
     stage: 5
     purpose: per-region structural classes (consistent / inversion / off-chromosome / ambiguous / redundant / no anchor) from a riparian run, combined with junction read calls, release edits and depth windows; separates read-supported reference differences from read-contradicted or unspanned candidates
