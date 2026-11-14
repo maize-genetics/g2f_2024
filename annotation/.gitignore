@@ -1,0 +1,20 @@
+# never commit data or results
+*.fa
+*.fa.gz
+*.fasta
+*.fna
+*.gff3
+*.gff
+*.gtf
+*.out
+*.tbl
+*.tar
+*.tar.gz
+*.h5
+*.sif
+*.bam
+logs/
+tmp/
+__pycache__/
+# local settings
+config.local.sh

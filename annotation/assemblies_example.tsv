@@ -1,0 +1,3 @@
+unit	source	fasta
+GENOTYPE1	release_v2.0	/path/to/GENOTYPE1.scaffolds.fa.gz
+GENOTYPE2	ragtag	/path/to/GENOTYPE2.softmasked.fa
