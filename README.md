@@ -14,8 +14,14 @@ configurable.
   that produced it.
 * Nothing is deleted unless you opt in, and raw data are never modified.
 
-The pipeline does not need an AI agent to run. Annotation (EDTA, GeneCAD,
-PlantCAD) and pangenome analyses are planned but **not yet implemented**;
+The pipeline does not need an AI agent to run.
+
+**Annotation.** The released assemblies were annotated with Helixer (gene
+prediction) and EDTA (transposable elements). The gene models were also
+checked with BUSCO and PSAURON, and syntenic orthologs to B73 were found with
+MCScan. These Slurm scripts are in [annotation/](annotation/README.md), with
+tool versions and settings. They run separately and are not part of the
+Snakemake workflow. Pangenome analyses are planned but not yet implemented;
 see [docs/planned_extensions.md](docs/planned_extensions.md).
 
 ## Contents
@@ -392,7 +398,8 @@ that has already been used is refused.
 | [docs/reference.md](docs/reference.md) | Input rules, resources, full output list, running all samples, rerun and safety rules, error messages |
 | [docs/rerunning_qc.md](docs/rerunning_qc.md) | Rerunning BUSCO, Merqury and statistics independently |
 | [docs/fingerprinting.md](docs/fingerprinting.md) | Optional k-mer genotype fingerprinting: method, calibration, outputs |
-| [docs/planned_extensions.md](docs/planned_extensions.md) | Planned annotation and pangenome modules |
+| [annotation/README.md](annotation/README.md) | Gene (Helixer) and TE (EDTA) annotation scripts for Slurm, run separately from the Snakemake workflow |
+| [docs/planned_extensions.md](docs/planned_extensions.md) | Planned pangenome modules (annotation now lives in `annotation/`) |
 | [config/local/README.md](config/local/README.md) | Untracked project and machine configuration |
 | [AGENTS.md](AGENTS.md) | Project principles, repository policy and rules for developers and AI assistants |
 
@@ -410,6 +417,7 @@ scripts/    g2f_tool.py and g2f_fingerprint.py command-line helpers, the g2f/ Py
 profiles/   Snakemake execution profiles (local = default; biohpc = optional)
 tests/      unit, fixture, dry-run and stub end-to-end tests (synthetic data only)
 docs/       user documentation
+annotation/ gene and TE annotation scripts (Helixer, BUSCO, PSAURON, MCScan, EDTA; Slurm, standalone)
 ```
 
 Real-tool compatibility tests (real pbtk, hifiasm, meryl, Merqury and BUSCO
