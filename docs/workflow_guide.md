@@ -113,6 +113,11 @@ example is a dual-haplotype run with overrides. Record their exact command and c
 
 To rerun or extend QC without reassembly, see [rerunning_qc.md](rerunning_qc.md).
 
+**Foreign contamination and organellar contigs** (`scripts/g2f_decontam.py`, **tool**). Screen every assembly that
+will be released: FCS-adaptor and FCS-GX for foreign sequence, and a window-based organelle screen for the species' own
+plastid and mitochondrial contigs. Removing what they find is a release step; see
+[Stage 8d](#stage-8d--removing-contaminant-and-organellar-records-tool).
+
 ## Stage 5 — Structural validation
 
 | | entry | status |
@@ -217,6 +222,8 @@ Agents prepare evidence tables. Humans decide.
 | independent verification of a reordered or renamed FASTA | `scripts/g2f_release_fasta.py verify` | **tool** |
 | annotation-tool input gate (GeneCAD) | `scripts/g2f_genecad_input_check.py` | **tool** (re-implementation; also run the real tool's input step when permitted) |
 | provenance table from the step records | `scripts/g2f_provenance_report.py` | **tool** |
+| remove foreign-contaminant and organellar unplaced records from a release (screens, candidate plan, apply, verify) | `scripts/g2f_decontam.py`, `scripts/g2f_release_exclude.py` ([Stage 8d](#stage-8d--removing-contaminant-and-organellar-records-tool)) | **tool** |
+| short, reversible sequence IDs for annotation tools | `scripts/g2f_seqid_alias.py` | **tool** |
 
 **Release rules**
 1. **Releases are immutable.**
@@ -351,6 +358,61 @@ stays in the FASTA.
    internal array.
 6. **Release.** A new versioned release keeps the previous AGPs and the change manifest. Coordinates of a feature
    convert old scaffold → contigs → new scaffold with `g2f_agp_lift.py`.
+
+## Stage 8d — Removing contaminant and organellar records (**tool**)
+
+Entry: `scripts/g2f_decontam.py` (screens and a candidate plan), `scripts/g2f_release_exclude.py` (applies the plan)
+and the independent verifier `scripts/g2f_release_exclude_verify.py`. Science: `config/decontam_science.yaml`.
+
+Whole records are removed only when they are unplaced singletons: the record is the sole, whole, + component of an AGP
+object of its own name. Removing anything placed in a scaffold would be a structural edit (Stage 6 / 8c). Organellar
+sequence inside nuclear contigs (NUMTs and NUPTs) is authentic nuclear sequence and stays.
+
+```bash
+g2f_decontam.py check-env --fcs-dir /path/to/fcs
+# foreign sequence: FCS-adaptor + FCS-GX (one assembly at a time; GX wants its database in shared memory)
+g2f_decontam.py fcs       --fasta UNIT.contigs.fa.gz --agp UNIT.agp --label UNIT --tax-id TAXID \
+                          --gx-db /dev/shm/gxdb/all --fcs-dir /path/to/fcs --threads 48 --out fcs/UNIT
+# the species' organelles: windows vs plastid + mitochondrial genomes; nuclear test against nuclear chromosomes
+g2f_decontam.py organelle --fasta UNIT.contigs.fa.gz --agp UNIT.agp --label UNIT --organelles organelles.fa \
+                          --plastid-ids PLASTID_ID --nuclear nuclear_chromosomes.fa --threads 16 --out organelle/UNIT
+# candidate plan for all assemblies
+g2f_decontam.py plan      --fcs fcs/* --organelle organelle/* --out plan
+```
+
+1. **Screen.**
+   - `fcs` runs NCBI FCS-adaptor (`--euk`) and FCS-GX (`screen genome` with the species' NCBI taxonomy ID). Download
+     and check the GX database once with FCS's own `fcs.py db get` and `db check` (about 500 GB), and record its build
+     date. `fcs-summarize` reads FCS output run elsewhere. Calls are the tools' own: GX `EXCLUDE` / `TRIM` / `FIX`
+     count as foreign; `REVIEW` and `INFO` are ambiguous and only reported; adaptor trims are reported per range.
+   - `organelle` cuts each unplaced record into 5-kb windows and aligns each window to the organelle references
+     (minimap2 `asm5`, secondary alignments kept). Coverage is the union of blocks at ≥ 90 % identity. Aligning windows
+     separately avoids a chaining artefact in which a short organellar stretch inside a long contig is dropped. Records
+     with ≥ 50 % coverage get a nuclear test: their non-organelle stretches are aligned to the nuclear reference.
+     - **CONFIDENT_ORGANELLE**: coverage ≥ 0.90 and < 5 kb of nuclear-aligned non-organelle sequence (plastid or
+       mitochondrion by the larger share, with `--plastid-ids`).
+     - **ORGANELLE_DOMINANT_MIXED**: coverage ≥ 0.50 otherwise. Never excluded automatically.
+     - Use references for every cytotype of the species: mitochondrial genomes differ between cytoplasms.
+2. **Plan.** `plan` writes `EXCLUSION_PLAN.candidate.tsv` (`unit, record, reason_class, evidence`) with only
+   whole-record calls on unplaced singletons: `FOREIGN_CONTAMINANT` (GX `EXCLUDE`) and `ORGANELLE_PLASTID` /
+   `ORGANELLE_MITOCHONDRION` (`CONFIDENT_ORGANELLE`). Everything else goes to `REVIEW.tsv`: partial calls, ambiguous GX
+   calls, mixed organelle records, a record with two different whole-record calls, and calls on placed contigs.
+3. **Decide.** The plan is a candidate. A human reviews it with `REVIEW.tsv` and decides which records to exclude. An
+   adaptor call inside a contig may be native sequence; check it (e.g. read support across the call) before masking.
+4. **Apply.** `g2f_release_exclude.py check-plan`, then `apply`. Kept records are copied byte for byte, and the AGP,
+   chain, contig-to-scaffold map and gap BED lose exactly the excluded records. `EXCLUDED_RECORDS.tsv` lists each
+   removed ID with its length and sequence hash, so annotation features on those IDs can be found and dropped.
+5. **Verify** with `g2f_release_exclude_verify.py`, which shares no code with the builder. It must PASS before release.
+6. **Re-screen** the result: the organelle screen of the remaining unplaced records should find no
+   `CONFIDENT_ORGANELLE` record.
+7. **Release.** A new versioned release with the plan, the screens and the verifier output as evidence.
+
+### Short sequence IDs for annotation tools (`scripts/g2f_seqid_alias.py`, **tool**)
+
+Some annotation tools (EDTA, for example) truncate sequence IDs longer than 13 characters or rewrite punctuation.
+`g2f_seqid_alias.py make` writes an alias FASTA with byte-identical sequences and a one-to-one map;
+`g2f_seqid_alias_verify.py` checks it independently; `translate` converts GFF3, BED, TSV and RepeatMasker `.out`
+results back to the original IDs and stops on an unknown ID.
 
 ## Extending the workflow
 

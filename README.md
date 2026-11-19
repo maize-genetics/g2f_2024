@@ -16,6 +16,14 @@ configurable.
 
 The pipeline does not need an AI agent to run.
 
+**After assembly.** Command-line tools cover the later steps; see
+[docs/workflow_guide.md](docs/workflow_guide.md):
+* structural validation;
+* telomere-based checks of scaffolds (`scripts/g2f_telomere.py`), with AGP-level revision of reversed or
+  misplaced chromosome tips (`scripts/g2f_agp_revise.py`);
+* screening for foreign contamination (NCBI FCS-GX, FCS-adaptor) and organellar contigs
+  (`scripts/g2f_decontam.py`), and removal of reviewed records from a release (`scripts/g2f_release_exclude.py`).
+
 **Annotation.** The released assemblies were annotated with Helixer (gene
 prediction) and EDTA (transposable elements). The gene models were also
 checked with BUSCO and PSAURON, and syntenic orthologs to B73 were found with
@@ -406,14 +414,17 @@ that has already been used is refused.
 ### Repository layout
 
 ```text
-config/     config.yaml (portable defaults), science.yaml, methods/ (immutable),
+config/     config.yaml (portable defaults), science.yaml, telomere_science.yaml, decontam_science.yaml, methods/ (immutable),
             fingerprint*.yaml, resources/, tools/, *.example.yaml, local/ (untracked)
 workflow/   Snakefile and rules/*.smk
 scripts/    g2f_tool.py and g2f_fingerprint.py command-line helpers, the g2f/ Python package,
             run_all_assemblies.sh (full-scale launcher), run_status.sh,
             g2f_asmqc.py / g2f_anchorwave*.py / g2f_breakpoint_reads.py (structural validation),
             g2f_release_fasta.py (reorder + verify release FASTAs), g2f_genecad_input_check.py
-            (annotation input gate), g2f_provenance_report.py (provenance table)
+            (annotation input gate), g2f_provenance_report.py (provenance table),
+            g2f_telomere.py / g2f_agp_revise*.py (telomere QC, scaffold revision),
+            g2f_decontam.py / g2f_release_exclude*.py (contamination + organelle screens, record removal),
+            g2f_seqid_alias*.py (short sequence IDs for annotation tools)
 profiles/   Snakemake execution profiles (local = default; biohpc = optional)
 tests/      unit, fixture, dry-run and stub end-to-end tests (synthetic data only)
 docs/       user documentation

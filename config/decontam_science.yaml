@@ -1,0 +1,40 @@
+# Scientific parameters for the foreign-contamination and organelle screens (scripts/g2f_decontam.py).
+# These are the built-in defaults (tests/test_decontam.py keeps the two identical). Pass a copy with --science to
+# change them; the effective values are recorded in every VALIDATED.json. Resource settings (threads), the NCBI
+# taxonomy ID of the species (--tax-id) and the organelle references (--organelles) are CLI options.
+version: 1
+
+fcs:
+  # FCS-adaptor mode: euk (eukaryote) or prok.
+  adaptor_mode: euk
+  # FCS-GX actions counted as foreign contamination (EXCLUDE = the whole sequence; TRIM / FIX = the reported range).
+  contaminant_actions: [EXCLUDE, TRIM, FIX]
+  # FCS-GX actions that are ambiguous calls; reported for review, never counted as contamination.
+  review_actions: [REVIEW, REVIEW_RARE, INFO]
+  # From the GX taxonomy report: a sequence whose mitochondrial + plastid length is >= this fraction is reported as
+  # organelle-dominant (the species' own organellar sequence, not contamination). Descriptive only; the organelle
+  # screen below makes the call.
+  gx_organelle_dominant_frac: 0.5
+
+organelle:
+  # Each record is cut into windows of window_bp (the last one shorter) and every window is aligned on its own. This
+  # avoids a whole-contig chaining artefact: a short organellar stretch inside a long contig can be dropped as a weak
+  # secondary alignment when the whole contig is aligned at once.
+  window_bp: 5000
+  minimap2_preset: asm5
+  # Secondary alignments are kept: the plastid inverted repeat and repeated mitochondrial regions align twice.
+  minimap2_extra: ["-N", "50", "-p", "0.1"]
+  # Alignment blocks below this identity (matches / block length) are ignored.
+  min_identity: 0.90
+  # CONFIDENT_ORGANELLE: organelle coverage >= confident_frac and < max_nuclear_bp of the non-organelle part aligns
+  # to the nuclear reference. ORGANELLE_DOMINANT_MIXED: coverage >= dominant_frac otherwise. Below dominant_frac the
+  # record is not reported as organellar (organelle-derived insertions in nuclear DNA are authentic sequence).
+  confident_frac: 0.90
+  dominant_frac: 0.50
+  max_nuclear_bp: 5000
+  # Nuclear test: non-organelle stretches of at least this length are aligned to the nuclear reference.
+  min_nonorganelle_segment_bp: 200
+  nuclear_preset: asm5
+
+# Chromosome objects in scaffold AGPs: object names matching this regex are never unplaced records.
+chromosome_regex: '_chr(\d+)(?:_part(\d+))?$'

@@ -10,7 +10,7 @@ ASMQC_PY=${ASMQC_PYTHON:-$(command -v python3)}
 if command -v module >/dev/null 2>&1; then module load python/3.12.7 >/dev/null 2>&1 || true; fi
 export TMPDIR="${TMPDIR:-$(realpath -m ../../tmp)}"   # the project tmp/ (not the shared /tmp)
 mkdir -p "$TMPDIR"
-if [[ $# -eq 0 ]]; then set -- test_discovery test_units test_workflow test_fingerprint test_realtools test_release_fasta test_provenance_report test_riparian test_inversion_riparian test_structure_map test_dup_pairs test_assembly_compare test_allmaps test_agp_lift test_fasta_gz_verify test_telomere test_agp_revise test_release_exclude test_seqid_alias test_workflow_stages; fi
+if [[ $# -eq 0 ]]; then set -- test_discovery test_units test_workflow test_fingerprint test_realtools test_release_fasta test_provenance_report test_riparian test_inversion_riparian test_structure_map test_dup_pairs test_assembly_compare test_allmaps test_agp_lift test_fasta_gz_verify test_telomere test_agp_revise test_release_exclude test_seqid_alias test_decontam test_workflow_stages; fi
 if [[ $# -eq 1 && $1 == test_asmqc ]]; then exec "$ASMQC_PY" -m unittest -v test_asmqc; fi
 # AnchorWave tests: the container tests run only when ANCHORWAVE_IMAGE names the .sif image.
 if [[ $# -eq 1 && $1 == test_anchorwave ]]; then exec "$ASMQC_PY" -m unittest -v test_anchorwave; fi

@@ -73,6 +73,15 @@ stages:
     outputs: ["results/<S>/qc/<method_id>/", "results/summary/"]
     gate: "*.validated.<VID>.<SID>.json markers"
     human_review: false
+  - id: contamination_organelle_screen
+    stage: 4
+    purpose: foreign-contamination screen (NCBI FCS-adaptor + FCS-GX, species tax-id) and window-based organelle screen (fixed-size windows aligned to the species' plastid and mitochondrial genomes with minimap2, nuclear test of organelle-dominant records); plan step turns whole-record calls on unplaced singletons into a candidate exclusion plan for release_record_exclusion, and lists partial, ambiguous, mixed, conflicting and placed calls for review
+    status: tool
+    entry: [scripts/g2f_decontam.py]
+    rules: []
+    outputs: ["<fcs>/{fcs_calls.tsv,gx_organelle_dominant.tsv,summary.json} + VALIDATED.json", "<organelle>/{organelle_screen.tsv,summary.json} + VALIDATED.json", "<plan>/{EXCLUSION_PLAN.candidate.tsv,REVIEW.tsv,summary.json} + VALIDATED.json"]
+    gate: VALIDATED.json per step; FCS output must name only records of the screened FASTA with matching lengths; calls are the tools' own (never inferred from GC, depth or placement); the plan is a candidate and excluding a record is a human decision
+    human_review: true
   - id: read_support
     stage: 5
     purpose: HiFi/ONT read support, depth classes, graph paths, pairwise sequence fate between assemblies
